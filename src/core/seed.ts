@@ -1,5 +1,7 @@
 import type {
   BusinessDoc,
+  Category,
+  CategoryField,
   Client,
   Company,
   Database,
@@ -18,6 +20,7 @@ import type {
   TaskItem,
 } from './types';
 import { DEFAULT_DEGRESSIVE } from './calc';
+import { OBJECT_LIBRARY, productIdForRef } from '../modules/studio/library';
 import { addDays, addMonths, monthKey, today, uid } from './utils';
 
 const NOW = today();
@@ -135,6 +138,207 @@ export const COMPANIES: Company[] = [
   },
 ];
 
+
+/* ------------------------------------------------------------- taxonomie */
+
+function field(
+  label: string,
+  kind: CategoryField['kind'],
+  extra: Partial<CategoryField> = {},
+): CategoryField {
+  return {
+    id: `f_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+    label,
+    kind,
+    options: extra.options ?? [],
+    unit: extra.unit ?? '',
+    defaultValue: extra.defaultValue ?? '',
+    required: extra.required ?? false,
+  };
+}
+
+interface CategorySeed {
+  label: string;
+  color: string;
+  icon: string;
+  entity?: Category['entity'];
+  fields?: CategoryField[];
+  /** Identifiant impose : les charges conservent leurs cles historiques. */
+  id?: string;
+}
+
+function buildCategories(domain: Category['domain'], seeds: CategorySeed[]): Category[] {
+  return seeds.map((seed, index) => ({
+    id: seed.id ?? `cat_${domain}_${seed.label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+    domain,
+    entity: seed.entity ?? 'groupe',
+    label: seed.label,
+    color: seed.color,
+    icon: seed.icon,
+    parentId: null,
+    order: index,
+    fields: seed.fields ?? [],
+    archived: false,
+    notes: '',
+  }));
+}
+
+export const CATEGORIES: Category[] = [
+  ...buildCategories('catalogue', [
+    {
+      label: 'Son — diffusion',
+      color: '#3987e5',
+      icon: '🔊',
+      fields: [field('SPL max', 'nombre', { unit: 'dB' }), field('Directivité', 'texte'), field('Bande passante', 'texte')],
+    },
+    { label: 'Son — retours', color: '#3987e5', icon: '🎚️', fields: [field('SPL max', 'nombre', { unit: 'dB' })] },
+    {
+      label: 'Son — régie',
+      color: '#3987e5',
+      icon: '🎛️',
+      fields: [field('Entrées', 'nombre'), field('Réseau audio', 'liste', { options: ['Dante', 'AES50', 'MADI', 'Aucun'] })],
+    },
+    { label: 'Son — micros', color: '#3987e5', icon: '🎤', fields: [field('Canaux', 'nombre'), field('Bande HF', 'texte')] },
+    { label: 'Son — DJ', color: '#3987e5', icon: '🎧' },
+    {
+      label: 'Lumière — asservis',
+      color: '#c98500',
+      icon: '💡',
+      fields: [field('Source', 'texte'), field('Zoom', 'texte'), field('Puissance', 'nombre', { unit: 'W' })],
+    },
+    { label: 'Lumière — statiques', color: '#c98500', icon: '🔦', fields: [field('Source', 'texte'), field('Indice IP', 'texte')] },
+    { label: 'Lumière — effets', color: '#c98500', icon: '🌫️' },
+    { label: 'Lumière — régie', color: '#c98500', icon: '🎛️', fields: [field('Paramètres', 'nombre')] },
+    {
+      label: 'Vidéo — LED',
+      color: '#d55181',
+      icon: '🟥',
+      fields: [field('Pitch', 'nombre', { unit: 'mm' }), field('Luminosité', 'nombre', { unit: 'nits' })],
+    },
+    { label: 'Vidéo — projection', color: '#d55181', icon: '📽️', fields: [field('Luminosité', 'nombre', { unit: 'lm' })] },
+    {
+      label: 'Structure',
+      color: '#8592a3',
+      icon: '🏗️',
+      fields: [field('Section', 'texte'), field('Charge admissible', 'nombre', { unit: 'kg' })],
+    },
+    {
+      label: 'Mobilier',
+      color: '#9c6b3f',
+      icon: '🪑',
+      fields: [field('Places', 'nombre'), field('Matériau', 'texte')],
+    },
+    {
+      label: 'Tentes & abris',
+      color: '#199e70',
+      icon: '⛺',
+      fields: [
+        field('Surface couverte', 'nombre', { unit: 'm²' }),
+        field('Hauteur sous barre', 'nombre', { unit: 'm' }),
+        field('Résistance au vent', 'texte'),
+      ],
+    },
+    { label: 'Énergie', color: '#e66767', icon: '⚡', fields: [field('Puissance', 'nombre', { unit: 'kVA' })] },
+    { label: 'Logistique', color: '#8592a3', icon: '🚚' },
+    { label: 'Personnel technique', color: '#199e70', icon: '👷', fields: [field('Amplitude', 'texte')] },
+    { label: 'Direction technique', color: '#199e70', icon: '📋' },
+    { label: 'Forfaits', color: '#d95926', icon: '🎁' },
+    { label: 'Ingénierie', color: '#9085e9', icon: '📐' },
+    { label: 'Conception', color: '#9085e9', icon: '🖼️' },
+    { label: 'Intégration', color: '#9085e9', icon: '🔧' },
+    { label: 'Vente matériel', color: '#3987e5', icon: '📦' },
+    { label: 'Récurrent', color: '#008300', icon: '🛡️' },
+  ]),
+
+  ...buildCategories('objet3d', [
+    { label: 'Son', color: '#3987e5', icon: '🔊' },
+    { label: 'Lumière', color: '#c98500', icon: '💡' },
+    { label: 'Vidéo', color: '#d55181', icon: '🟥' },
+    { label: 'Structure & scène', color: '#8592a3', icon: '🏗️' },
+    { label: 'Mobilier & réception', color: '#9c6b3f', icon: '🪑' },
+    { label: 'Tentes & abris', color: '#199e70', icon: '⛺' },
+    { label: 'Décor & extérieur', color: '#008300', icon: '🌳' },
+    { label: 'Énergie & technique', color: '#e66767', icon: '⚡' },
+    { label: 'Échelle & circulation', color: '#b9c3d0', icon: '🚶' },
+  ]),
+
+  ...buildCategories('charge', [
+    { id: 'achat-materiel', label: 'Achat de matériel', color: '#3987e5', icon: '📦' },
+    { id: 'sous-traitance', label: 'Sous-traitance', color: '#d95926', icon: '🤝' },
+    { id: 'transport', label: 'Transport', color: '#199e70', icon: '🚚' },
+    { id: 'carburant', label: 'Carburant', color: '#c98500', icon: '⛽' },
+    { id: 'salaires', label: 'Salaires & charges', color: '#d55181', icon: '👥' },
+    { id: 'loyer', label: 'Loyer', color: '#008300', icon: '🏢' },
+    { id: 'assurance', label: 'Assurance', color: '#9085e9', icon: '🛡️' },
+    { id: 'marketing', label: 'Marketing', color: '#e66767', icon: '📣' },
+    { id: 'logiciels', label: 'Logiciels', color: '#3987e5', icon: '💻' },
+    { id: 'maintenance', label: 'Maintenance', color: '#c98500', icon: '🔧' },
+    { id: 'divers', label: 'Divers', color: '#8592a3', icon: '•' },
+  ]),
+
+  ...buildCategories('source', [
+    { label: 'Site de prospection', color: '#3987e5', icon: '🌐' },
+    { label: 'Recommandation', color: '#199e70', icon: '👍' },
+    { label: 'Réseau pro', color: '#199e70', icon: '🤝' },
+    { label: 'Salon Heavent', color: '#d95926', icon: '🎪' },
+    { label: 'Salon du mariage', color: '#d55181', icon: '💍' },
+    { label: 'Marché public', color: '#9085e9', icon: '🏛️' },
+    { label: 'Appel d’offres', color: '#9085e9', icon: '📄' },
+    { label: 'Veille marchés publics', color: '#9085e9', icon: '🔍' },
+    { label: 'Prospection sortante', color: '#c98500', icon: '📞' },
+    { label: 'Bouche à oreille', color: '#008300', icon: '🗣️' },
+    { label: 'Instagram', color: '#e66767', icon: '📷' },
+  ]),
+
+  ...buildCategories('projet', [
+    { label: 'Festival', color: '#d95926', icon: '🎸' },
+    { label: 'Concert', color: '#3987e5', icon: '🎵' },
+    { label: 'Convention', color: '#9085e9', icon: '🏢' },
+    { label: 'Mariage', color: '#d55181', icon: '💍' },
+    { label: 'Salon', color: '#c98500', icon: '🎪' },
+    { label: 'Intégration', color: '#199e70', icon: '🔧' },
+    { label: 'Résidence', color: '#008300', icon: '📅' },
+  ]),
+
+  ...buildCategories('client', [
+    { label: 'Grand compte', color: '#3987e5', icon: '🏢' },
+    { label: 'PME', color: '#199e70', icon: '🏭' },
+    { label: 'Collectivité', color: '#9085e9', icon: '🏛️' },
+    { label: 'Association', color: '#c98500', icon: '🤝' },
+    { label: 'Particulier', color: '#d55181', icon: '🏠' },
+    { label: 'Prescripteur', color: '#008300', icon: '📣' },
+  ]),
+
+  ...buildCategories('competence', [
+    { label: 'Son façade', color: '#3987e5', icon: '🎚️' },
+    { label: 'Retours', color: '#3987e5', icon: '🔈' },
+    { label: 'Captation', color: '#3987e5', icon: '🎙️' },
+    { label: 'Conception lumière', color: '#c98500', icon: '💡' },
+    { label: 'grandMA3', color: '#c98500', icon: '🎛️' },
+    { label: 'Accroche-levage', color: '#8592a3', icon: '🏗️' },
+    { label: 'Vidéo LED', color: '#d55181', icon: '🟥' },
+    { label: 'Régie générale', color: '#199e70', icon: '📋' },
+    { label: 'Sécurité ERP', color: '#e66767', icon: '🦺' },
+    { label: 'Gestion de parc', color: '#008300', icon: '📦' },
+    { label: 'Électronique', color: '#9085e9', icon: '🔧' },
+    { label: 'Permis C', color: '#8592a3', icon: '🚚' },
+  ]),
+
+  ...buildCategories('etiquette', [
+    { label: 'récurrent', color: '#199e70', icon: '↻' },
+    { label: 'grand compte', color: '#3987e5', icon: '★' },
+    { label: 'saisonnier', color: '#c98500', icon: '☀' },
+    { label: 'à qualifier', color: '#8592a3', icon: '?' },
+    { label: 'marché public', color: '#9085e9', icon: '🏛️' },
+    { label: 'petit ticket', color: '#d55181', icon: '•' },
+  ]),
+];
+
+/** Identifiant de la categorie portant ce libelle dans ce domaine. */
+export function categoryIdFor(domain: Category['domain'], label: string): string | null {
+  return CATEGORIES.find((entry) => entry.domain === domain && entry.label === label)?.id ?? null;
+}
+
 /* --------------------------------------------------------------- helpers */
 
 function serials(prefix: string, count: number, price: number, from: string): SerialItem[] {
@@ -149,7 +353,7 @@ function serials(prefix: string, count: number, price: number, from: string): Se
   }));
 }
 
-type ProductSeed = Omit<Product, 'id' | 'serials' | 'active' | 'degressive'> & {
+type ProductSeed = Omit<Product, 'id' | 'serials' | 'active' | 'degressive' | 'categoryId' | 'attributes'> & {
   serialCount?: number;
   degressive?: Product['degressive'];
 };
@@ -160,6 +364,8 @@ function product(seed: ProductSeed): Product {
     ...seed,
     id,
     active: true,
+    categoryId: categoryIdFor('catalogue', seed.category),
+    attributes: {},
     degressive: seed.degressive ?? DEFAULT_DEGRESSIVE,
     serials:
       seed.mode === 'location' && seed.serialCount
@@ -170,409 +376,71 @@ function product(seed: ProductSeed): Product {
 
 /* ------------------------------------------------------------- catalogue */
 
+/**
+ * Catalogue : les references materiel sont generees depuis la bibliotheque du
+ * Studio — source unique — puis completees par les prestations et forfaits,
+ * qui n'ont pas de representation 3D.
+ */
+const LIBRARY_PRODUCTS: Product[] = (() => {
+  const seen = new Set<string>();
+  const out: Product[] = [];
+  for (const entry of OBJECT_LIBRARY) {
+    if (!entry.product || seen.has(entry.product.ref)) continue;
+    seen.add(entry.product.ref);
+    const source = entry.product;
+    out.push({
+      id: productIdForRef(source.ref),
+      entity: source.entity,
+      ref: source.ref,
+      name: source.name,
+      brand: source.brand,
+      model: source.model,
+      category: source.category,
+      categoryId: categoryIdFor('catalogue', source.category),
+      attributes: {},
+      mode: source.mode,
+      unit: source.unit,
+      priceDay: source.priceDay,
+      priceSale: source.priceSale,
+      cost: source.cost,
+      vatRate: 20,
+      stock: stockFor(source),
+      weightKg: source.weightKg,
+      powerW: source.powerW,
+      specs: source.specs,
+      degressive: DEFAULT_DEGRESSIVE,
+      mark: entry.icon,
+      model3d: entry.id,
+      serials: serialsFor(source),
+      active: true,
+    });
+  }
+  return out;
+})();
+
+/** Quantite au parc : le petit materiel se compte par centaines, pas a l'unite. */
+function stockFor(source: (typeof OBJECT_LIBRARY)[number]['product']): number {
+  if (!source) return 0;
+  if (source.mode !== 'location') return source.mode === 'vente' ? 20 : 0;
+  if (source.cost <= 50) return 400;
+  if (source.cost <= 150) return 200;
+  if (source.cost <= 400) return 80;
+  if (source.cost <= 1200) return 24;
+  if (source.cost <= 5000) return 12;
+  if (source.cost <= 15000) return 4;
+  return 2;
+}
+
+/** Suivi unitaire : reserve au materiel de valeur, ou il a un sens. */
+function serialsFor(source: (typeof OBJECT_LIBRARY)[number]['product']): SerialItem[] {
+  if (!source || source.mode !== 'location' || source.cost < 900) return [];
+  return serials(source.ref, Math.min(16, stockFor(source)), source.cost, addMonths(NOW, -26));
+}
+
 export const PRODUCTS: Product[] = [
-  /* ---------------------------------------------------------- MSR — son */
-  product({
-    entity: 'msr',
-    ref: 'KARA2',
-    name: 'Line array L-Acoustics Kara II',
-    brand: 'L-Acoustics',
-    model: 'Kara II',
-    category: 'Son — diffusion',
-    mode: 'location',
-    unit: 'élément',
-    priceDay: 95,
-    priceSale: 0,
-    cost: 6800,
-    vatRate: 20,
-    stock: 16,
-    weightKg: 26,
-    powerW: 400,
-    specs: { SPL: '142 dB', Directivité: '110° x 10°', Bande: '55 Hz – 20 kHz' },
-    mark: '🔊',
-    model3d: 'line-array',
-    serialCount: 16,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'SB18',
-    name: 'Caisson de basse L-Acoustics SB18',
-    brand: 'L-Acoustics',
-    model: 'SB18',
-    category: 'Son — diffusion',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 85,
-    priceSale: 0,
-    cost: 5200,
-    vatRate: 20,
-    stock: 12,
-    weightKg: 51,
-    powerW: 700,
-    specs: { SPL: '138 dB', Bande: '32 Hz – 100 Hz', Charge: 'Bass-reflex 18"' },
-    mark: '🔊',
-    model3d: 'sub',
-    serialCount: 12,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'Y10P',
-    name: 'Enceinte d&b audiotechnik Y10P',
-    brand: 'd&b audiotechnik',
-    model: 'Y10P',
-    category: 'Son — diffusion',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 55,
-    priceSale: 0,
-    cost: 3100,
-    vatRate: 20,
-    stock: 8,
-    weightKg: 19,
-    powerW: 300,
-    specs: { SPL: '137 dB', Directivité: '110° x 40°' },
-    mark: '🔈',
-    model3d: 'top-speaker',
-    serialCount: 8,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'M4',
-    name: 'Retour de scène d&b M4',
-    brand: 'd&b audiotechnik',
-    model: 'M4',
-    category: 'Son — retours',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 42,
-    priceSale: 0,
-    cost: 2400,
-    vatRate: 20,
-    stock: 10,
-    weightKg: 21,
-    powerW: 250,
-    specs: { SPL: '135 dB', Angle: '2 positions' },
-    mark: '🎚️',
-    model3d: 'monitor',
-    serialCount: 10,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'CL5',
-    name: 'Console numérique Yamaha CL5',
-    brand: 'Yamaha',
-    model: 'CL5',
-    category: 'Son — régie',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 240,
-    priceSale: 0,
-    cost: 17500,
-    vatRate: 20,
-    stock: 2,
-    weightKg: 38,
-    powerW: 200,
-    specs: { Entrées: '72 mono + 8 stéréo', Réseau: 'Dante 64x64' },
-    mark: '🎛️',
-    model3d: 'console',
-    serialCount: 2,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'M32',
-    name: 'Console numérique Midas M32 Live',
-    brand: 'Midas',
-    model: 'M32 Live',
-    category: 'Son — régie',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 120,
-    priceSale: 0,
-    cost: 4200,
-    vatRate: 20,
-    stock: 3,
-    weightKg: 26,
-    powerW: 150,
-    specs: { Entrées: '32 préamplis', Réseau: 'AES50' },
-    mark: '🎛️',
-    model3d: 'console',
-    serialCount: 3,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'AD4Q',
-    name: 'Micro HF Shure Axient AD4Q + 4 émetteurs',
-    brand: 'Shure',
-    model: 'Axient Digital AD4Q',
-    category: 'Son — micros',
-    mode: 'location',
-    unit: 'kit',
-    priceDay: 180,
-    priceSale: 0,
-    cost: 9800,
-    vatRate: 20,
-    stock: 4,
-    weightKg: 8,
-    powerW: 60,
-    specs: { Canaux: '4', Bande: '470 – 636 MHz' },
-    mark: '🎤',
-    model3d: null,
-    serialCount: 4,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'CDJ3000',
-    name: 'Régie DJ Pioneer 2x CDJ-3000 + DJM-A9',
-    brand: 'Pioneer DJ',
-    model: 'CDJ-3000 / DJM-A9',
-    category: 'Son — DJ',
-    mode: 'location',
-    unit: 'set',
-    priceDay: 210,
-    priceSale: 0,
-    cost: 11200,
-    vatRate: 20,
-    stock: 3,
-    weightKg: 32,
-    powerW: 200,
-    specs: { Écran: '9" tactile', Sorties: 'XLR + Digital' },
-    mark: '🎧',
-    model3d: 'dj-booth',
-    serialCount: 3,
-  }),
-  /* ------------------------------------------------------ MSR — lumière */
-  product({
-    entity: 'msr',
-    ref: 'POINTE',
-    name: 'Lyre Robe Pointe',
-    brand: 'Robe',
-    model: 'Pointe',
-    category: 'Lumière — asservis',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 68,
-    priceSale: 0,
-    cost: 4900,
-    vatRate: 20,
-    stock: 24,
-    weightKg: 23,
-    powerW: 470,
-    specs: { Source: 'Osram 280 W', Zoom: '2,5° – 20°', Prismes: '2' },
-    mark: '💡',
-    model3d: 'moving-head',
-    serialCount: 24,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'MISTRAL',
-    name: 'Lyre wash Ayrton Mistral-TC',
-    brand: 'Ayrton',
-    model: 'Mistral-TC',
-    category: 'Lumière — asservis',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 74,
-    priceSale: 0,
-    cost: 5600,
-    vatRate: 20,
-    stock: 12,
-    weightKg: 21,
-    powerW: 350,
-    specs: { Source: 'LED 300 W', Zoom: '7° – 55°', CRI: '> 90' },
-    mark: '💡',
-    model3d: 'moving-head',
-    serialCount: 12,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'COLORADO',
-    name: 'PAR LED Chauvet COLORado 2 Solo',
-    brand: 'Chauvet Pro',
-    model: 'COLORado 2 Solo',
-    category: 'Lumière — statiques',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 26,
-    priceSale: 0,
-    cost: 1150,
-    vatRate: 20,
-    stock: 36,
-    weightKg: 9,
-    powerW: 190,
-    specs: { Source: 'RGBW 60 W', Zoom: '6° – 41°', IP: 'IP65' },
-    mark: '🔦',
-    model3d: 'par-led',
-    serialCount: 36,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'BLINDER',
-    name: 'Blinder Molefay 8 lite',
-    brand: 'Mole-Richardson',
-    model: 'Molefay 8',
-    category: 'Lumière — statiques',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 34,
-    priceSale: 0,
-    cost: 980,
-    vatRate: 20,
-    stock: 8,
-    weightKg: 12,
-    powerW: 5200,
-    specs: { Lampes: '8 x 650 W', Alimentation: 'DMX 2 circuits' },
-    mark: '🔆',
-    model3d: 'blinder',
-    serialCount: 8,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'MDGATMO',
-    name: 'Machine à brouillard MDG Atmosphere APS',
-    brand: 'MDG',
-    model: 'Atmosphere APS',
-    category: 'Lumière — effets',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 90,
-    priceSale: 0,
-    cost: 6400,
-    vatRate: 20,
-    stock: 3,
-    weightKg: 18,
-    powerW: 400,
-    specs: { Fluide: 'Neutral', Autonomie: '10 h' },
-    mark: '🌫️',
-    model3d: 'haze',
-    serialCount: 3,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'GRANDMA3',
-    name: 'Console lumière grandMA3 light',
-    brand: 'MA Lighting',
-    model: 'grandMA3 light',
-    category: 'Lumière — régie',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 320,
-    priceSale: 0,
-    cost: 42000,
-    vatRate: 20,
-    stock: 1,
-    weightKg: 34,
-    powerW: 250,
-    specs: { Paramètres: '4 096', Écrans: '3 tactiles' },
-    mark: '🎛️',
-    model3d: 'console',
-    serialCount: 1,
-  }),
-  /* ------------------------------------------- MSR — vidéo & structure */
-  product({
-    entity: 'msr',
-    ref: 'ROECB5',
-    name: 'Dalle LED ROE Carbon CB5 (0,5 x 0,5 m)',
-    brand: 'ROE Visual',
-    model: 'Carbon CB5',
-    category: 'Vidéo — LED',
-    mode: 'location',
-    unit: 'dalle',
-    priceDay: 38,
-    priceSale: 0,
-    cost: 1450,
-    vatRate: 20,
-    stock: 96,
-    weightKg: 8,
-    powerW: 120,
-    specs: { Pitch: '5,77 mm', Luminosité: '4 500 nits', Indoor: 'IP54' },
-    mark: '🟥',
-    model3d: 'led-wall',
-    serialCount: 0,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'H30V3',
-    name: 'Structure Prolyte H30V — poutre 3 m',
-    brand: 'Prolyte',
-    model: 'H30V-L300',
-    category: 'Structure',
-    mode: 'location',
-    unit: 'poutre',
-    priceDay: 18,
-    priceSale: 0,
-    cost: 420,
-    vatRate: 20,
-    stock: 48,
-    weightKg: 14,
-    powerW: 0,
-    specs: { Section: '290 mm', Charge: '1 100 kg à 6 m' },
-    mark: '🏗️',
-    model3d: 'truss',
-    serialCount: 0,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'MT1',
-    name: 'Tour de levage Milos MT1 (6 m)',
-    brand: 'Milos',
-    model: 'MT1',
-    category: 'Structure',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 55,
-    priceSale: 0,
-    cost: 2100,
-    vatRate: 20,
-    stock: 8,
-    weightKg: 78,
-    powerW: 0,
-    specs: { Hauteur: '6,2 m', Charge: '250 kg' },
-    mark: '🏗️',
-    model3d: 'truss-tower',
-    serialCount: 8,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'NIVTEC',
-    name: 'Praticable Nivtec 2 x 1 m',
-    brand: 'Nivtec',
-    model: '200x100',
-    category: 'Structure',
-    mode: 'location',
-    unit: 'praticable',
-    priceDay: 16,
-    priceSale: 0,
-    cost: 380,
-    vatRate: 20,
-    stock: 60,
-    weightKg: 27,
-    powerW: 0,
-    specs: { Charge: '750 kg/m²', Hauteurs: '20 à 100 cm' },
-    mark: '🟫',
-    model3d: 'stage-deck',
-    serialCount: 0,
-  }),
-  product({
-    entity: 'msr',
-    ref: 'GE60',
-    name: 'Groupe électrogène insonorisé 60 kVA',
-    brand: 'SDMO',
-    model: 'R66',
-    category: 'Énergie',
-    mode: 'location',
-    unit: 'unité',
-    priceDay: 260,
-    priceSale: 0,
-    cost: 21000,
-    vatRate: 20,
-    stock: 2,
-    weightKg: 1100,
-    powerW: 0,
-    specs: { Puissance: '60 kVA', Bruit: '62 dB à 7 m', Autonomie: '12 h' },
-    mark: '⚡',
-    model3d: null,
-    serialCount: 2,
-  }),
+  ...LIBRARY_PRODUCTS,
+
+  /* ------------------------------------------------------- MSR — logistique */
   product({
     entity: 'msr',
     ref: 'LIVRAISON',
@@ -593,7 +461,28 @@ export const PRODUCTS: Product[] = [
     mark: '🚚',
     model3d: null,
   }),
-  /* -------------------------------------------- Marée Sonore — services */
+  product({
+    entity: 'msr',
+    ref: 'MONTAGE',
+    name: 'Équipe de montage / démontage',
+    brand: 'MSR',
+    model: '',
+    category: 'Logistique',
+    mode: 'service',
+    unit: 'technicien / jour',
+    priceDay: 340,
+    priceSale: 340,
+    cost: 215,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '8 h', 'Heures sup.': '48 €/h' },
+    mark: '👷',
+    model3d: null,
+  }),
+
+  /* -------------------------------------------- Marée Sonore — prestations */
   product({
     entity: 'maree-sonore',
     ref: 'MS-FOH',
@@ -632,6 +521,26 @@ export const PRODUCTS: Product[] = [
     powerW: 0,
     specs: { Amplitude: '10 h' },
     mark: '💡',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-BAR',
+    name: 'Personnel de bar / service',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Personnel technique',
+    mode: 'service',
+    unit: 'personne / soirée',
+    priceDay: 260,
+    priceSale: 260,
+    cost: 170,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '8 h', Tenue: 'Fournie' },
+    mark: '🍸',
     model3d: null,
   }),
   product({
@@ -679,6 +588,29 @@ export const PRODUCTS: Product[] = [
   }),
   product({
     entity: 'maree-sonore',
+    ref: 'MS-GUINGUETTE',
+    name: 'Guinguette clé en main 150 personnes',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Forfaits',
+    mode: 'forfait',
+    unit: 'forfait',
+    priceDay: 4200,
+    priceSale: 4200,
+    cost: 1850,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: {
+      Inclus: 'Tente stretch 10 x 15, bar 4 m, tireuse 2 becs, mobilier 150 places, guirlandes, sono, régie',
+      Montage: 'J-1, démontage J+1',
+    },
+    mark: '🎪',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
     ref: 'MS-CAPTA',
     name: 'Captation multipiste & mixage',
     brand: 'Marée Sonore',
@@ -697,6 +629,7 @@ export const PRODUCTS: Product[] = [
     mark: '🎙️',
     model3d: null,
   }),
+
   /* ------------------------------------------------- Owlaris — ingénierie */
   product({
     entity: 'owlaris',
@@ -735,7 +668,7 @@ export const PRODUCTS: Product[] = [
     weightKg: 0,
     powerW: 0,
     specs: {
-      Livrables: '3 vues HD, visite temps réel, plan d’implantation',
+      Livrables: '3 vues HD, visite temps réel, plan d’implantation coté',
       Délai: '5 jours ouvrés',
     },
     mark: '🖼️',
@@ -779,7 +712,7 @@ export const PRODUCTS: Product[] = [
     powerW: 100,
     specs: { SPL: '104 dB', Fixation: 'Support mural inclus' },
     mark: '🔈',
-    model3d: 'top-speaker',
+    model3d: null,
   }),
   product({
     entity: 'owlaris',
@@ -1347,6 +1280,7 @@ export const STAFF: Staff[] = [
 export const PROJECTS: Project[] = [
   {
     id: 'prj_festival_estuaire',
+    categoryId: categoryIdFor('projet', 'Festival'),
     entity: 'msr',
     name: 'Festival Estuaire Sonore — scène principale',
     clientId: 'cli_hellfest',
@@ -1368,6 +1302,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'prj_convention_verdance',
+    categoryId: categoryIdFor('projet', 'Convention'),
     entity: 'msr',
     name: 'Convention annuelle Verdance Retail',
     clientId: 'cli_lidl',
@@ -1387,6 +1322,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'prj_mariage_durand',
+    categoryId: categoryIdFor('projet', 'Mariage'),
     entity: 'maree-sonore',
     name: 'Mariage Durand-Nowak',
     clientId: 'cli_durand',
@@ -1405,6 +1341,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'prj_concorde_salle2',
+    categoryId: categoryIdFor('projet', 'Intégration'),
     entity: 'owlaris',
     name: 'Cinéma Le Concorde — rénovation salle 2',
     clientId: 'cli_cinema',
@@ -1426,6 +1363,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'prj_cceg_polyvalente',
+    categoryId: categoryIdFor('projet', 'Intégration'),
     entity: 'owlaris',
     name: 'CCEG — équipement salle polyvalente Treillières',
     clientId: 'cli_cc_erdre',
@@ -1444,6 +1382,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'prj_stereolux_saison',
+    categoryId: categoryIdFor('projet', 'Résidence'),
     entity: 'msr',
     name: 'Stereolux — renfort de parc saison',
     clientId: 'cli_stereolux',
@@ -2381,14 +2320,21 @@ function item(
     productId: extra.productId ?? null,
     model3d,
     label,
+    categoryId: extra.categoryId ?? null,
     qty: extra.qty ?? 1,
     x,
     y,
     z,
     rotY: extra.rotY ?? 0,
+    rotX: extra.rotX ?? 0,
     scale: extra.scale ?? 1,
+    width: extra.width ?? null,
+    height: extra.height ?? null,
+    depth: extra.depth ?? null,
     color: extra.color ?? '#1b1e24',
     beam: extra.beam ?? 0,
+    locked: extra.locked ?? false,
+    notes: extra.notes ?? '',
   };
 }
 
@@ -2419,6 +2365,100 @@ function row(
 
 export const SCENES: Scene[] = [
   {
+    id: 'scn_guinguette',
+    entity: 'maree-sonore',
+    name: 'Guinguette du bord de Loire — 150 couverts',
+    clientId: 'cli_chateau',
+    projectId: null,
+    venueType: 'plein-air',
+    width: 34,
+    depth: 26,
+    height: 6,
+    audience: 150,
+    ambient: 0.34,
+    haze: 0.14,
+    exposure: 1,
+    bloom: 0.42,
+    timeOfDay: 'crepuscule',
+    floorTone: 'gazon-tondu',
+    wallTone: '#15181d',
+    groundShape: 'rectangle',
+    polygon: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 250,
+    notes:
+      'Guinguette clé en main : tente stretch 10 x 15, bar 4 modules avec tireuse 2 becs, plancha et four à pizza, 150 couverts en tables brasserie, guirlandes guinguette, sanitaires et groupe électrogène.',
+    createdAt: addDays(NOW, -8),
+    items: [
+      // Abri principal et bar
+      item('tente-stretch', 'Tente stretch 10 x 15 m', 0, 0, -1, { productId: P('STRETCH150'), width: 10, height: 4.5, depth: 15 }),
+      item('bar', 'Bar 4 modules', -8.5, 0, 2, { productId: P('BARMOD'), width: 4, rotY: Math.PI / 2 }),
+      item('back-bar', 'Arrière-bar réfrigéré', -10.2, 0, 2, { productId: P('ARRIEREBAR'), rotY: Math.PI / 2 }),
+      item('pompe-biere', 'Tireuse 2 becs', -8.5, 1.15, 1.2, { productId: P('TIREUSE2'), rotY: Math.PI / 2 }),
+      item('fut-biere', 'Fût 30 L', -10, 0, 0.6, { productId: P('FUT30') }),
+      item('fut-biere', 'Fût 30 L', -10, 0, 1.2, { productId: P('FUT30') }),
+      item('frigo-boissons', 'Frigo à boissons', -10.2, 0, 4.2, { productId: P('FRIGO600'), rotY: Math.PI / 2 }),
+      item('machine-glacons', 'Machine à glaçons', -10.2, 0, 5.4, { productId: P('GLACONS60'), rotY: Math.PI / 2 }),
+      item('caisse', 'Poste d’encaissement', -8.5, 1.15, 3.4, { productId: P('CAISSE'), rotY: Math.PI / 2 }),
+      item('auvent-bar', 'Auvent de bar', -9.3, 0, 2, { productId: P('AUVENT'), rotY: Math.PI / 2, width: 6, depth: 2.4 }),
+
+      // Restauration
+      item('plancha', 'Plancha gaz', -8.5, 0, 7.5, { productId: P('PLANCHA') }),
+      item('four-pizza', 'Four à pizza mobile', -6.4, 0, 7.8, { productId: P('FOURPIZZA') }),
+      item('table-inox', 'Table de travail inox', -8.5, 0, 9, { productId: P('TABLEINOX') }),
+      item('plonge', 'Plonge 2 bacs', -6.4, 0, 9.2, { productId: P('PLONGE2') }),
+      item('chambre-froide', 'Chambre froide 6 m³', -13.5, 0, 8.5, { productId: P('CFROIDE6') }),
+
+      // Salle : tables brasserie sous la tente
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, -5.5, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, -2, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, 1.5, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, -4.6, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, -1.1, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, 2.4, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('cocktail-table', 'Mange-debout', 4, -6, 6, 0, 6.5, { productId: P('MANGEDEBOUT') }),
+
+      // Scène et son
+      ...row('stage-deck', 'Praticable', 4, -3, 3, 0, -10.5, { productId: P('NIVTEC'), width: 2, height: 0.4, depth: 2 }),
+      ...row('top-speaker', 'Enceinte sur pied', 2, -5.5, 5.5, 0, -9, { productId: P('DBY7P') }),
+      item('sub', 'Sub', -4.6, 0, -9.4, { productId: P('SB18') }),
+      item('sub', 'Sub', 4.6, 0, -9.4, { productId: P('SB18') }),
+      item('dj-booth', 'Régie DJ', 0, 0.4, -10.5, { productId: P('CDJ3000') }),
+      ...row('par-led', 'PAR LED', 6, -4.5, 4.5, 3.6, -9.8, { productId: P('COLORADO'), beam: 0.55, color: '#c98500' }),
+
+      // Lumière d’ambiance
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, -6, { productId: P('GUINGUETTE'), width: 10 }),
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, -1, { productId: P('GUINGUETTE'), width: 10 }),
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, 4, { productId: P('GUINGUETTE'), width: 10 }),
+      item('fanions', 'Guirlande de fanions', 0, 3.2, 7.6, { productId: P('FANIONS'), width: 12 }),
+      ...row('uplight', 'Uplight', 4, -6, 6, 0, -7.5, { productId: P('UPLIGHT'), beam: 0.6, color: '#d55181' }),
+      item('mirror-ball', 'Boule à facettes', 0, 3.9, -3, { productId: P('BOULE50') }),
+
+      // Confort, décor, sécurité
+      ...row('parasol-chauffant', 'Parasol chauffant', 2, -7.5, 7.5, 0, 5, { productId: P('CHAUFFANT') }),
+      item('brasero', 'Brasero', 8.5, 0, 8.5, { productId: P('BRASERO') }),
+      ...row('plante', 'Plante', 4, -9, 9, 0, 9.5, { productId: P('PLANTE') }),
+      item('arbre', 'Arbre existant', 13, 0, -6, { width: 5, height: 7, depth: 5 }),
+      item('arbre', 'Arbre existant', 15, 0, 5, { width: 4.5, height: 6, depth: 4.5 }),
+      ...row('barrier', 'Barrière Vauban', 4, -14, 14, 0, 12.5, { productId: P('VAUBAN'), width: 6 }),
+      item('panneau', 'Signalétique entrée', 12, 0, 10, { productId: P('PANNEAU') }),
+      item('extincteur', 'Extincteur', -7.6, 0, 6.2, { productId: P('EXTINCTEUR') }),
+
+      // Sanitaires et logistique
+      ...row('wc-mobile', 'WC autonome', 3, 10.5, 13.5, 0, -9, { productId: P('WCAUTO') }),
+      item('wc-pmr', 'WC PMR', 13.5, 0, -6.5, { productId: P('WCPMR') }),
+      item('bloc-lavabo', 'Bloc lavabo', 10.5, 0, -6.5, { productId: P('LAVABO4') }),
+      item('groupe-electrogene', 'Groupe électrogène 60 kVA', -14, 0, -9, { productId: P('GE60'), rotY: Math.PI / 2 }),
+      item('coffret-electrique', 'Coffret 63 A', -12, 0, -7, { productId: P('COFFRET63') }),
+      item('cable-ramp', 'Passage de câbles', -11, 0, -3, { productId: P('PASSECABLE'), width: 6, rotY: Math.PI / 2 }),
+      item('container-stockage', 'Container de stockage', 14, 0, 0, { productId: P('CONTAINER20'), rotY: Math.PI / 2 }),
+      item('remorque', 'Remorque bâchée', 11, 0, 4, { productId: P('REMORQUE') }),
+      ...row('bin', 'Poubelle de tri', 3, 5, 8, 0, 9, { productId: P('POUBELLE') }),
+    ],
+  },
+  {
     id: 'scn_festival',
     entity: 'msr',
     name: 'Estuaire Sonore — scène principale',
@@ -2434,8 +2474,14 @@ export const SCENES: Scene[] = [
     exposure: 1.05,
     bloom: 0.55,
     timeOfDay: 'nuit',
-    floorTone: '#2b2a27',
+    floorTone: 'gazon-tondu',
     wallTone: '#0b0d12',
+    groundShape: 'rectangle',
+    polygon: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
     notes: 'Ouverture de scène 14 m, hauteur sous grill 9 m. Line array 6 boîtes par côté.',
     createdAt: addDays(NOW, -12),
     items: [
@@ -2472,8 +2518,14 @@ export const SCENES: Scene[] = [
     exposure: 1,
     bloom: 0.3,
     timeOfDay: 'nuit',
-    floorTone: '#3a3129',
+    floorTone: 'moquette',
     wallTone: '#15181d',
+    groundShape: 'rectangle',
+    polygon: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
     notes: 'Plénière assise 700 personnes, mur LED 6 x 3 m, pupitre côté jardin.',
     createdAt: addDays(NOW, -4),
     items: [
@@ -2504,8 +2556,14 @@ export const SCENES: Scene[] = [
     exposure: 1.15,
     bloom: 0.42,
     timeOfDay: 'nuit',
-    floorTone: '#4a3a2c',
+    floorTone: 'parquet',
     wallTone: '#1c1a18',
+    groundShape: 'rectangle',
+    polygon: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
     notes: 'Cérémonie 16 h en extérieur, dîner et soirée dansante sous orangerie.',
     createdAt: addDays(NOW, -26),
     items: [
@@ -2677,6 +2735,7 @@ export function createSeedDatabase(): Database {
     pages: PAGES,
     scenes: SCENES,
     tasks: TASKS,
+    categories: CATEGORIES,
     settings: {
       activeScope: 'groupe',
       numbering,
@@ -2686,6 +2745,7 @@ export function createSeedDatabase(): Database {
       locale: 'fr-FR',
       revenueTargets: { msr: 260000, 'maree-sonore': 175000, owlaris: 200000 },
       operator: 'Gaël Lauwerier',
+      station: 'Bureau Nantes',
     },
   };
 }

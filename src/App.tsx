@@ -72,9 +72,38 @@ export default function App() {
   );
 }
 
+/** Etat du partage reseau, visible en permanence dans la barre du haut. */
+function SyncIndicator() {
+  const { sync } = useStore();
+  const config =
+    sync.status === 'connecte'
+      ? { icon: '🟢', label: `Partagé · ${sync.presence.length || 1} poste${sync.presence.length > 1 ? 's' : ''}`, tone: 'good' as const }
+      : sync.status === 'connexion'
+        ? { icon: '🟡', label: 'Connexion…', tone: 'warning' as const }
+        : sync.status === 'erreur'
+          ? { icon: '🔴', label: 'Serveur injoignable', tone: 'critical' as const }
+          : { icon: '💾', label: 'Local', tone: 'neutre' as const };
+  return (
+    <span
+      className="badge"
+      title={
+        sync.status === 'connecte'
+          ? `Base partagée — révision ${sync.revision}${sync.presence.length ? ` — ${sync.presence.map((poste) => poste.nom).join(', ')}` : ''}`
+          : 'Base locale à ce poste. Lancez « npm start » pour partager la base sur le réseau.'
+      }
+      style={{
+        borderColor: config.tone === 'good' ? 'rgba(12,163,12,0.35)' : undefined,
+      }}
+    >
+      <span aria-hidden="true">{config.icon}</span>
+      {config.label}
+    </span>
+  );
+}
+
 function Shell() {
   const store = useStore();
-  const { db, scope, setScope, company, visible, toasts, dismissToast } = store;
+  const { db, scope, setScope, company, visible, toasts, dismissToast, sync } = store;
   const [view, setView] = useState<ViewId>('pilotage');
   const [focus, setFocus] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -215,7 +244,11 @@ function Shell() {
 
           <div className="nav-foot">
             <div>{db.settings.operator}</div>
-            <div className="dim">Données locales — pensez à exporter</div>
+            <div className="dim">
+              {sync.status === 'connecte'
+                ? `${db.settings.station} · base partagée`
+                : 'Base locale — pensez à exporter'}
+            </div>
           </div>
         </nav>
 
@@ -226,6 +259,7 @@ function Shell() {
               <span>{company ? `${company.legalName} · ${company.city}` : 'Vue consolidée des trois sociétés'}</span>
             </div>
             <div className="topbar-actions">
+              <SyncIndicator />
               <div className="search" style={{ width: 300, position: 'relative' }}>
                 <input
                   placeholder="Rechercher un client, un devis, du matériel…"

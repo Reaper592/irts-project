@@ -47,6 +47,53 @@ export interface Company {
   cgv: string;
 }
 
+
+/* ------------------------------------------------------------- taxonomie */
+
+/**
+ * Domaines de classement geres par l'utilisateur. Chaque domaine possede sa
+ * propre liste de categories, creables, renommables et supprimables depuis
+ * l'interface, avec les parametres qu'elles imposent a leurs elements.
+ */
+export type TaxonomyDomain =
+  | 'catalogue'
+  | 'objet3d'
+  | 'charge'
+  | 'source'
+  | 'competence'
+  | 'projet'
+  | 'client'
+  | 'etiquette';
+
+export type FieldKind = 'texte' | 'nombre' | 'booleen' | 'liste';
+
+/** Parametre additionnel porte par tous les elements d'une categorie. */
+export interface CategoryField {
+  id: string;
+  label: string;
+  kind: FieldKind;
+  /** Valeurs proposees pour un parametre de type liste. */
+  options: string[];
+  unit: string;
+  defaultValue: string;
+  required: boolean;
+}
+
+export interface Category {
+  id: string;
+  domain: TaxonomyDomain;
+  /** Portee : une societe, ou « groupe » pour une categorie partagee. */
+  entity: EntityId | 'groupe';
+  label: string;
+  color: string;
+  icon: string;
+  parentId: string | null;
+  order: number;
+  fields: CategoryField[];
+  archived: boolean;
+  notes: string;
+}
+
 export type ClientKind = 'pro' | 'particulier' | 'collectivite' | 'association';
 export type ClientStatus = 'prospect' | 'actif' | 'inactif' | 'bloque';
 
@@ -150,7 +197,12 @@ export interface Product {
   name: string;
   brand: string;
   model: string;
+  /** Libelle de categorie, aligne sur la taxonomie « catalogue ». */
   category: string;
+  /** Identifiant de la categorie geree, quand elle est renseignee. */
+  categoryId: string | null;
+  /** Valeurs des parametres definis par la categorie. */
+  attributes: Record<string, string>;
   mode: ProductMode;
   unit: string;
   /** Prix de location HT pour une journee. */
@@ -277,6 +329,7 @@ export interface Project {
   end: string;
   venue: string;
   address: string;
+  categoryId: string | null;
   /** Budget de vente HT vise. */
   budget: number;
   manager: string;
@@ -312,18 +365,8 @@ export interface Assignment {
   role: string;
 }
 
-export type ExpenseCategory =
-  | 'achat-materiel'
-  | 'sous-traitance'
-  | 'transport'
-  | 'carburant'
-  | 'salaires'
-  | 'loyer'
-  | 'assurance'
-  | 'marketing'
-  | 'logiciels'
-  | 'maintenance'
-  | 'divers';
+/** Categorie de charge : identifiant d'une categorie du domaine « charge ». */
+export type ExpenseCategory = string;
 
 export interface Expense {
   id: string;
@@ -383,20 +426,38 @@ export interface LandingPage {
 
 export type VenueType = 'salle' | 'plein-air' | 'chapiteau' | 'club' | 'eglise' | 'showroom';
 
+/** Forme de l'emprise du terrain. */
+export type GroundShape = 'rectangle' | 'l' | 'cercle' | 'ovale' | 'polygone';
+
+export interface GroundPoint {
+  x: number;
+  z: number;
+}
+
 export interface SceneItem {
   id: string;
   productId: string | null;
   model3d: string;
   label: string;
+  categoryId: string | null;
   qty: number;
   x: number;
   y: number;
   z: number;
   rotY: number;
+  /** Inclinaison, en radians : lyres accrochees, ecrans, pentes. */
+  rotX: number;
   scale: number;
+  /** Dimensions imposees en metres. Absentes = dimensions nominales du modele. */
+  width: number | null;
+  height: number | null;
+  depth: number | null;
   color: string;
   /** Intensite du faisceau pour les projecteurs (0 = eteint). */
   beam: number;
+  /** Objet verrouille : ni deplacable ni redimensionnable a la souris. */
+  locked: boolean;
+  notes: string;
 }
 
 export interface Scene {
@@ -417,6 +478,16 @@ export interface Scene {
   timeOfDay: 'jour' | 'crepuscule' | 'nuit';
   floorTone: string;
   wallTone: string;
+  groundShape: GroundShape;
+  /** Sommets de l'emprise, en metres, pour la forme « polygone ». */
+  polygon: GroundPoint[];
+  /** Pas d'accrochage de la grille, en metres. 0 = accrochage desactive. */
+  gridSnap: number;
+  showGrid: boolean;
+  /** Qualite de rendu : « rapide » privilegie la fluidite, « photo » l'image. */
+  quality: 'rapide' | 'equilibre' | 'photo';
+  /** Azimut du soleil en degres, pour l'ombre portee en exterieur. */
+  sunAzimuth: number;
   items: SceneItem[];
   notes: string;
   createdAt: string;
@@ -445,6 +516,8 @@ export interface Settings {
   /** Objectif de chiffre d'affaires HT annuel par entite. */
   revenueTargets: Record<EntityId, number>;
   operator: string;
+  /** Nom du poste affiche aux autres utilisateurs connectes. */
+  station: string;
 }
 
 export interface Database {
@@ -463,5 +536,6 @@ export interface Database {
   pages: LandingPage[];
   scenes: Scene[];
   tasks: TaskItem[];
+  categories: Category[];
   settings: Settings;
 }

@@ -6,6 +6,7 @@ import { addDays, formatDate, money0, num, pct, sum, today, uid } from '../core/
 import { Badge, Card, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Segmented, Tabs } from '../ui/kit';
 import { BarList, ColumnChart, DonutChart, StatTile, seriesColor } from '../ui/charts';
 import { EntityChip, STAGES, StageBadge } from '../ui/shared';
+import { CategoryManager, ManageCategoriesButton } from '../ui/CategoryManager';
 
 const ACTIVITY_ICON: Record<Activity['type'], string> = {
   appel: '📞',
@@ -96,6 +97,7 @@ export default function Prospection() {
         subtitle="Pipeline commercial des trois sociétés, de la demande entrante à la signature"
         actions={
           <>
+            <ManageCategoriesButton domain="source" label="Origines" />
             <button type="button" className="btn" onClick={() => go('site')}>
               Site de prospection
             </button>
@@ -341,6 +343,36 @@ export default function Prospection() {
       ) : null}
     </div>
   );
+}
+
+/** Origine d'une affaire, choisie dans la taxonomie « source ». */
+function SourceSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { categories } = useStore();
+  const [manage, setManage] = useState(false);
+  const list = categories('source');
+  return (
+    <>
+      <div className="row" style={{ gap: 6 }}>
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">— non renseignée —</option>
+          {list.map((entry) => (
+            <option key={entry.id} value={entry.label}>
+              {entry.icon} {entry.label}
+            </option>
+          ))}
+          {value && !list.some((entry) => entry.label === value) ? <option value={value}>{value}</option> : null}
+        </select>
+        <button type="button" className="btn btn-sm" title="Gérer les origines" onClick={() => setManage(true)}>
+          ⚙
+        </button>
+      </div>
+      {manage ? <ManageCategoriesModal onClose={() => setManage(false)} /> : null}
+    </>
+  );
+}
+
+function ManageCategoriesModal({ onClose }: { onClose: () => void }) {
+  return <CategoryManager domain="source" onClose={onClose} />;
 }
 
 const PROBABILITY: Record<DealStage, number> = {
@@ -651,7 +683,7 @@ function DealForm({
             </select>
           </Field>
           <Field label="Origine">
-            <input value={value.source} onChange={(event) => set('source', event.target.value)} />
+            <SourceSelect value={value.source} onChange={(next) => set('source', next)} />
           </Field>
 
           <Field label="E-mail">

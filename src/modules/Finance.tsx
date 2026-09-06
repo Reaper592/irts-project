@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../core/store';
 import { docTotals, monthlyFinance, vatBalance } from '../core/calc';
-import type { EntityId, Expense, ExpenseCategory } from '../core/types';
+import type { EntityId, Expense } from '../core/types';
 import {
   downloadFile,
   formatDate,
@@ -16,22 +16,9 @@ import {
   uid,
 } from '../core/utils';
 import { Badge, Card, ConfirmDialog, DataTable, EmptyState, Field, Modal, PageHeader, Tabs, type Column } from '../ui/kit';
+import { CategorySelect, ManageCategoriesButton } from '../ui/CategoryManager';
 import { ColumnChart, DonutChart, LineChart, StatTile } from '../ui/charts';
 import { EntityChip } from '../ui/shared';
-
-const CATEGORY_LABEL: Record<ExpenseCategory, string> = {
-  'achat-materiel': 'Achat de matériel',
-  'sous-traitance': 'Sous-traitance',
-  transport: 'Transport',
-  carburant: 'Carburant',
-  salaires: 'Salaires & charges',
-  loyer: 'Loyer',
-  assurance: 'Assurance',
-  marketing: 'Marketing',
-  logiciels: 'Logiciels',
-  maintenance: 'Maintenance',
-  divers: 'Divers',
-};
 
 function emptyExpense(entity: EntityId): Expense {
   return {
@@ -50,7 +37,9 @@ function emptyExpense(entity: EntityId): Expense {
 }
 
 export default function Finance() {
-  const { db, scope, visible, update, defaultEntity, toast, companyOf } = useStore();
+  const { db, scope, visible, update, defaultEntity, toast, companyOf, categoryById } = useStore();
+  /** Libellé d’une catégorie de charge, resolu depuis la taxonomie. */
+  const labelOf = (id: string) => categoryById(id)?.label ?? (id || 'Non classée');
   const [tab, setTab] = useState('resultat');
   const [draft, setDraft] = useState<Expense | null>(null);
   const [period, setPeriod] = useState(12);
@@ -79,7 +68,7 @@ export default function Finance() {
     );
     const byCategory = new Map<string, number>();
     for (const expense of expensesPeriod) {
-      byCategory.set(CATEGORY_LABEL[expense.category], (byCategory.get(CATEGORY_LABEL[expense.category]) ?? 0) + expense.amountHT);
+      byCategory.set(labelOf(expense.category), (byCategory.get(labelOf(expense.category)) ?? 0) + expense.amountHT);
     }
     const byEntity = new Map<EntityId, { revenue: number; charges: number }>();
     for (const doc of inPeriod) {
@@ -134,7 +123,7 @@ export default function Finance() {
       key: 'category',
       header: 'Catégorie',
       sort: (row) => row.category,
-      cell: (row) => <span className="small muted">{CATEGORY_LABEL[row.category]}</span>,
+      cell: (row) => <span className="small muted">{labelOf(row.category)}</span>,
     },
     {
       key: 'recurring',
@@ -170,6 +159,7 @@ export default function Finance() {
               <option value={12}>12 derniers mois</option>
               <option value={24}>24 derniers mois</option>
             </select>
+            <ManageCategoriesButton domain="charge" label="Catégories de charges" />
             <button type="button" className="btn btn-primary" onClick={() => setDraft(emptyExpense(defaultEntity))}>
               + Saisir une charge
             </button>
@@ -358,7 +348,7 @@ export default function Finance() {
                       Date: expense.date,
                       Societe: companyOf(expense.entity).name,
                       Libelle: expense.label,
-                      Categorie: CATEGORY_LABEL[expense.category],
+                      Categorie: labelOf(expense.category),
                       Fournisseur: expense.supplier,
                       'Montant HT': expense.amountHT,
                       'TVA %': expense.vatRate,
@@ -504,13 +494,13 @@ function ExpenseForm({
             <input value={value.label} onChange={(event) => set('label', event.target.value)} autoFocus />
           </Field>
           <Field label="Catégorie">
-            <select value={value.category} onChange={(event) => set('category', event.target.value as ExpenseCategory)}>
-              {Object.entries(CATEGORY_LABEL).map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <CategorySelect
+              domain="charge"
+              value={value.category || null}
+              entity={value.entity}
+              allowEmpty={false}
+              onChange={(id) => set('category', id ?? '')}
+            />
           </Field>
           <Field label="Fournisseur">
             <input value={value.supplier} onChange={(event) => set('supplier', event.target.value)} />

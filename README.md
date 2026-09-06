@@ -27,35 +27,67 @@ en mesurer la rentabilité.
 | **Équipe** | Permanents, intermittents et prestataires, coûts et tarifs journaliers, affectations aux projets, couverture des compétences et points de fragilité. |
 | **Finance** | Compte de résultat par société et consolidé, trésorerie facturée contre encaissée, journal des charges, point mort, TVA collectée et déductible. |
 | **Tâches** | Relances et engagements, reliés au document ou à l'affaire concernée. |
-| **Paramètres** | Identité légale et bancaire des trois sociétés, mentions et CGV, numérotation continue, objectifs annuels, sauvegarde et restauration. |
+| **Paramètres** | Identité légale et bancaire des trois sociétés, mentions et CGV, numérotation continue, objectifs annuels, gestion des catégories, état du partage réseau, sauvegarde et restauration. |
 
 ## Démarrer
 
 ```bash
 npm install
-npm run dev        # serveur de développement
-npm run build      # build de production dans dist/
-npm run preview    # prévisualisation du build
+npm run build      # construit l'application
+npm start          # sert l'application et la base partagée sur le réseau
+```
+
+Le terminal affiche l'adresse à ouvrir, par exemple `http://192.168.1.20:8080`.
+**Chaque ordinateur du réseau ouvre cette adresse : tous travaillent sur la même
+base et voient les modifications des autres en direct.** Sans serveur joignable,
+l'application fonctionne seule sur le poste avec sa base locale.
+
+```bash
+npm run dev        # serveur de développement (relaie /api vers le serveur)
+npm run serve      # build puis démarrage du serveur partagé
+npm run preview    # prévisualisation du build statique
 npm run typecheck  # vérification TypeScript
 npm run lint       # oxlint
 ```
 
-Le build produit un site statique dans `dist/`, déployable tel quel sur
-n'importe quel hébergeur.
+### Mise en réseau
+
+Le serveur (`server/index.js`, sans aucune dépendance) sert l'application
+construite et expose une base commune :
+
+- `GET /api/etat` — la base et sa révision ;
+- `POST /api/ops` — les modifications, fiche par fiche ;
+- `GET /api/flux` — le flux d'événements qui prévient les autres postes.
+
+La fusion se fait par enregistrement : deux personnes qui éditent deux clients
+différents ne s'écrasent jamais ; sur la même fiche, la dernière écriture
+l'emporte. La base vit dans `data/irts-db.json`, écrite de façon atomique.
+Pour un accès depuis l'extérieur, publiez ce port derrière votre routeur ou un
+tunnel HTTPS.
 
 ## Choix techniques
 
 - **React 19 + TypeScript + Vite.** Pas de framework applicatif : un magasin
   d'état unique (`src/core/store.tsx`) et un routage par vue suffisent.
-- **Stockage local.** Les données vivent dans le `localStorage` du navigateur,
-  derrière une interface unique (`update(draft => …)`). Aucune donnée ne quitte
-  le poste. Pour brancher un back-office, il n'y a qu'un point à remplacer : la
-  persistance du magasin. Les paramètres offrent l'export et la restauration
-  d'une sauvegarde JSON complète.
+- **Base partagée ou locale.** Quand un serveur IRTS est joignable, tous les
+  postes travaillent sur la même base et sont prévenus en direct ; sinon
+  l'application retombe sur le `localStorage` du navigateur. Les deux modes
+  passent par la même interface (`update(draft => …)`), et les paramètres
+  offrent l'export et la restauration d'une sauvegarde JSON complète.
+- **Catégories gérées par l'utilisateur.** Huit domaines — catalogue, familles
+  d'objets 3D, charges, origines d'affaires, compétences, types de projets,
+  segments clients, étiquettes — se règlent depuis leur propre menu ou depuis
+  les paramètres : nom, couleur, pictogramme, portée et paramètres imposés aux
+  fiches. À la suppression, l'application demande vers quelle catégorie
+  reclasser les éléments.
 - **Three.js** pour le Studio, chargé à la demande : le moteur 3D ne pèse sur
-  aucune autre vue. Pipeline PBR complet — environnement IBL, tone mapping ACES
-  filmique, ombres douces, halo sélectif, faisceaux volumétriques et foule
-  instanciée pour l'échelle.
+  aucune autre vue. Pipeline PBR complet — tone mapping ACES filmique, ombres
+  portées cadrées sur l'emprise, occlusion ambiante en espace écran calibrée sur
+  la taille du site, halo appliqué après la conversion en sRGB, faisceaux
+  volumétriques et foule instanciée avec de vraies silhouettes.
+  L'éclairage indirect est capté depuis le ciel de la scène : un environnement
+  de studio d'intérieur avait été essayé, son irradiance effaçait les ombres en
+  extérieur.
 - **Graphiques faits main en SVG.** Palette catégorielle validée pour la vision
   des couleurs sur la surface sombre de l'application, un seul axe de valeurs
   par graphique, légende dès deux séries, étiquettes directes parcimonieuses et
@@ -65,15 +97,36 @@ n'importe quel hébergeur.
   disponibilité et taux d'occupation du parc, coût de revient par nature de
   ligne, agrégats financiers mensuels.
 
+## Le Studio en pratique
+
+Chaque objet de la bibliothèque porte à la fois son modèle 3D et sa fiche
+produit : marque, modèle, unité de facturation, prix, poids et puissance. Le
+catalogue de l'application est **généré depuis cette bibliothèque**, si bien
+qu'un objet posé dans une scène arrive dans le devis sans ressaisie, avec sa
+désignation, ses cotes réelles et son prix. Les quantités facturées suivent la
+nature de l'objet : un bar au mètre de comptoir, un mur LED à la dalle, une
+piste de danse au mètre carré, une guirlande à la longueur, un bloc de sièges à
+la place.
+
+Raccourcis : `D` déplacer · `R` tourner · `T` dimensionner · `P` vue en plan ·
+`G` grille · `Suppr` supprimer · `Ctrl+Z` annuler.
+
+Le moteur expose `window.irtsStudio.diagnostics()` : état des ombres, des
+passes de rendu et de l'éclairage, pour le support et les tests de rendu.
+
 ## Structure
 
 ```
+server/index.js   serveur de partage réseau et hébergement de l'application
 src/
-  core/       modèle de données, calculs métier, magasin, génération de documents
-  ui/         composants d'interface et graphiques
-  modules/    une vue par module métier
-  modules/studio/  moteur de rendu 3D et son interface
-  styles/     socle visuel
+  core/           modèle de données, calculs métier, magasin, synchronisation,
+                  génération de documents
+  ui/             composants d'interface, graphiques, gestion des catégories
+  modules/        une vue par module métier
+  modules/studio/ bibliothèque d'objets, modèles 3D, matériaux, moteur de rendu
+                  et interface du Studio
+  styles/         socle visuel
+data/             base partagée écrite par le serveur
 ```
 
 ## Données de démonstration
@@ -93,5 +146,10 @@ de vider une collection ou de tout réinitialiser.
   de vie commerciale exprimée en journées louées (`RENTAL_LIFE_DAYS`) et ajoute
   une part de manutention (`HANDLING_RATE`). Ces deux constantes sont à caler
   sur la réalité du parc.
-- La sauvegarde est locale : exportez régulièrement depuis **Paramètres →
-  Données**.
+- En mode partagé, la base vit sur le poste serveur (`data/irts-db.json`) :
+  sauvegardez ce fichier, ou exportez depuis **Paramètres → Données**.
+- Le serveur n'a ni comptes ni mots de passe : il est prévu pour un réseau de
+  confiance. Avant toute exposition sur Internet, placez-le derrière une
+  authentification et du HTTPS.
+- Les prix et références du catalogue sont réalistes mais indicatifs : calez-les
+  sur vos tarifs avant de les présenter à un client.

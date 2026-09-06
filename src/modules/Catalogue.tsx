@@ -6,6 +6,7 @@ import { addDays, downloadFile, formatDate, money, money0, num, pct, sum, toCSV,
 import { Badge, Card, ConfirmDialog, DataTable, EmptyState, Field, Modal, PageHeader, Tabs, type Column } from '../ui/kit';
 import { BarList, DonutChart, StatTile } from '../ui/charts';
 import { EntityChip } from '../ui/shared';
+import { CategoryBadge, CategorySelect, ManageCategoriesButton } from '../ui/CategoryManager';
 
 const MODE_LABEL: Record<ProductMode, string> = {
   location: 'Location',
@@ -30,6 +31,8 @@ function emptyProduct(entity: EntityId): Product {
     brand: '',
     model: '',
     category: '',
+    categoryId: null,
+    attributes: {},
     mode: 'location',
     unit: 'unité',
     priceDay: 0,
@@ -49,7 +52,8 @@ function emptyProduct(entity: EntityId): Product {
 }
 
 export default function Catalogue() {
-  const { db, scope, visible, update, defaultEntity, toast } = useStore();
+  const store = useStore();
+  const { db, scope, visible, update, defaultEntity, toast } = store;
   const [tab, setTab] = useState('catalogue');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('toutes');
@@ -60,16 +64,20 @@ export default function Catalogue() {
   const products = useMemo(() => visible(db.products), [db.products, visible]);
   const reservations = useMemo(() => reservationsFrom(db.docs), [db.docs]);
 
-  const categories = useMemo(
-    () => ['toutes', ...new Set(products.map((product) => product.category))].sort(),
-    [products],
+  const catalogueCategories = store.categories('catalogue');
+  const categoryOptions = useMemo(
+    () => [
+      { id: 'toutes', label: 'Toutes catégories' },
+      ...catalogueCategories.map((entry) => ({ id: entry.id, label: `${entry.icon} ${entry.label}` })),
+    ],
+    [catalogueCategories],
   );
 
   const rows = useMemo(() => {
     const months = 12;
     const since = addDays(today(), -365);
     return products
-      .filter((product) => (category === 'toutes' ? true : product.category === category))
+      .filter((product) => (category === 'toutes' ? true : product.categoryId === category))
       .filter((product) => {
         if (!query.trim()) return true;
         return `${product.name} ${product.ref} ${product.brand} ${product.model} ${product.category}`
@@ -150,7 +158,8 @@ export default function Catalogue() {
       key: 'category',
       header: 'Catégorie',
       sort: (row) => row.product.category,
-      cell: (row) => <span className="small muted">{row.product.category}</span>,
+      cell: (row) =>
+        row.product.categoryId ? <CategoryBadge id={row.product.categoryId} /> : <span className="small muted">{row.product.category}</span>,
     },
     {
       key: 'mode',
@@ -291,13 +300,14 @@ export default function Catalogue() {
               <div className="search" style={{ width: 220 }}>
                 <input placeholder="Nom, marque, référence…" value={query} onChange={(event) => setQuery(event.target.value)} />
               </div>
-              <select value={category} onChange={(event) => setCategory(event.target.value)} style={{ width: 180 }}>
-                {categories.map((entry) => (
-                  <option key={entry} value={entry}>
-                    {entry === 'toutes' ? 'Toutes catégories' : entry}
+              <select value={category} onChange={(event) => setCategory(event.target.value)} style={{ width: 190 }}>
+                {categoryOptions.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.label}
                   </option>
                 ))}
               </select>
+              <ManageCategoriesButton domain="catalogue" />
               <input type="date" value={window0.start} onChange={(event) => setWindow0({ ...window0, start: event.target.value })} style={{ width: 140 }} />
               <input type="date" value={window0.end} onChange={(event) => setWindow0({ ...window0, end: event.target.value })} style={{ width: 140 }} />
             </>
@@ -420,6 +430,53 @@ export default function Catalogue() {
         />
       ) : null}
     </div>
+  );
+}
+
+/** Parametres imposes par la categorie du produit. */
+function CategoryFields({ value, onChange }: { value: Product; onChange: (product: Product) => void }) {
+  const { categoryById } = useStore();
+  const category = categoryById(value.categoryId);
+  if (!category?.fields.length) return null;
+  const set = (fieldId: string, next: string) =>
+    onChange({ ...value, attributes: { ...value.attributes, [fieldId]: next } });
+
+  return (
+    <>
+      {category.fields.map((field) => (
+        <Field
+          key={field.id}
+          label={`${field.label}${field.required ? ' *' : ''}`}
+          hint={field.unit ? `en ${field.unit}` : undefined}
+        >
+          {field.kind === 'liste' ? (
+            <select value={value.attributes[field.id] ?? ''} onChange={(event) => set(field.id, event.target.value)}>
+              <option value="">—</option>
+              {field.options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          ) : field.kind === 'booleen' ? (
+            <label className="row" style={{ gap: 8, cursor: 'pointer', padding: '7px 0' }}>
+              <input
+                type="checkbox"
+                checked={value.attributes[field.id] === 'oui'}
+                onChange={(event) => set(field.id, event.target.checked ? 'oui' : 'non')}
+              />
+              <span className="small">Oui</span>
+            </label>
+          ) : (
+            <input
+              type={field.kind === 'nombre' ? 'number' : 'text'}
+              value={value.attributes[field.id] ?? ''}
+              onChange={(event) => set(field.id, event.target.value)}
+            />
+          )}
+        </Field>
+      ))}
+    </>
   );
 }
 
@@ -716,7 +773,15 @@ function ProductForm({
           </Field>
 
           <Field label="Catégorie">
-            <input value={value.category} onChange={(event) => set('category', event.target.value)} list="cat-list" />
+            <CategorySelect
+              domain="catalogue"
+              value={value.categoryId}
+              entity={value.entity}
+              onChange={(id) => {
+                const found = db.categories.find((entry) => entry.id === id);
+                onChange({ ...value, categoryId: id, category: found?.label ?? value.category });
+              }}
+            />
           </Field>
           <Field label="Unité">
             <input value={value.unit} onChange={(event) => set('unit', event.target.value)} />
@@ -759,7 +824,8 @@ function ProductForm({
           <Field label="Puissance (W)">
             <input type="number" min={0} step={10} value={value.powerW} onChange={(event) => set('powerW', Number(event.target.value))} />
           </Field>
-          <Field label="Caractéristiques" span={2} hint="Une par ligne, au format « clé : valeur »">
+          <CategoryFields value={value} onChange={onChange} />
+          <Field label="Caractéristiques libres" span={2} hint="Une par ligne, au format « clé : valeur »">
             <textarea
               rows={3}
               value={Object.entries(value.specs)

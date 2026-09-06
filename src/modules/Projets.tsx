@@ -7,6 +7,7 @@ import { formatDate, money, money0, pct, sum, today, uid } from '../core/utils';
 import { Badge, Card, ConfirmDialog, DataTable, EmptyState, Field, Modal, PageHeader, type Column } from '../ui/kit';
 import { StatTile } from '../ui/charts';
 import { EntityChip, ProjectStatusBadge } from '../ui/shared';
+import { CategoryBadge, CategorySelect, ManageCategoriesButton } from '../ui/CategoryManager';
 
 function emptyProject(entity: EntityId, clientId: string): Project {
   return {
@@ -19,6 +20,7 @@ function emptyProject(entity: EntityId, clientId: string): Project {
     end: today(),
     venue: '',
     address: '',
+    categoryId: null,
     budget: 0,
     manager: '',
     checklist: [],
@@ -101,6 +103,12 @@ export default function Projets() {
       ),
     },
     {
+      key: 'type',
+      header: 'Type',
+      sort: (row) => row.project.categoryId ?? '',
+      cell: (row) => <CategoryBadge id={row.project.categoryId} />,
+    },
+    {
       key: 'status',
       header: 'Statut',
       sort: (row) => row.project.status,
@@ -157,6 +165,7 @@ export default function Projets() {
               <option value="en-cours">En cours</option>
               <option value="termine">Terminés</option>
             </select>
+            <ManageCategoriesButton domain="projet" label="Types de projet" />
             <button
               type="button"
               className="btn btn-primary"
@@ -471,6 +480,14 @@ function ProjectForm({
               <option value="termine">Terminé</option>
               <option value="annule">Annulé</option>
             </select>
+          </Field>
+          <Field label="Type de projet">
+            <CategorySelect
+              domain="projet"
+              value={value.categoryId}
+              entity={value.entity}
+              onChange={(id) => set('categoryId', id)}
+            />
           </Field>
           <Field label="Nom du projet" span={3}>
             <input value={value.name} onChange={(event) => set('name', event.target.value)} autoFocus />

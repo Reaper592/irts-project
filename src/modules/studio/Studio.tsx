@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../core/store';
 import { useNav } from '../../core/nav';
-import { StudioEngine, type CameraPreset } from './engine';
-import type { EntityId, Scene, SceneItem, VenueType } from '../../core/types';
+import { StudioEngine, groundArea, type CameraPreset, type TransformMode } from './engine';
+import { GROUND_KINDS, OBJECT_LIBRARY, billableUnits, itemSize, objectDef, productIdForRef } from './library';
+import type { EntityId, GroundShape, Scene, SceneItem, VenueType } from '../../core/types';
 import { addDays, downloadFile, esc, money, money0, num, sum, today, uid } from '../../core/utils';
 import { Badge, Card, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Segmented } from '../../ui/kit';
-import { sceneToLines } from '../../core/calc';
+import { CategorySelect, ManageCategoriesButton } from '../../ui/CategoryManager';
+import { sceneLines, sceneToLines } from '../../core/calc';
 
 const VENUES: { id: VenueType; label: string }[] = [
   { id: 'salle', label: 'Salle' },
@@ -17,11 +19,18 @@ const VENUES: { id: VenueType; label: string }[] = [
 ];
 
 const CAMERAS: { id: CameraPreset; label: string; hint: string }[] = [
-  { id: 'public', label: 'Œil du public', hint: 'Hauteur 1,70 m, au centre de la jauge' },
+  { id: 'plan', label: 'Plan', hint: 'Vue de dessus cotée, pour poser l’implantation' },
+  { id: 'public', label: 'Œil du public', hint: 'Hauteur 1,70 m au centre de la jauge' },
   { id: 'face', label: 'Face', hint: 'Vue frontale de la scène' },
   { id: 'plongee', label: 'Plongée', hint: 'Vue d’ensemble en hauteur' },
   { id: 'laterale', label: 'Latérale', hint: 'Depuis le côté cour' },
   { id: 'scene', label: 'Depuis la scène', hint: 'Contrechamp vers la salle' },
+];
+
+const MODES: { id: TransformMode; label: string; key: string }[] = [
+  { id: 'translate', label: 'Déplacer', key: 'D' },
+  { id: 'rotate', label: 'Tourner', key: 'R' },
+  { id: 'scale', label: 'Dimensionner', key: 'T' },
 ];
 
 function emptyScene(entity: EntityId): Scene {
@@ -31,18 +40,29 @@ function emptyScene(entity: EntityId): Scene {
     name: 'Nouvelle implantation',
     clientId: null,
     projectId: null,
-    venueType: 'salle',
-    width: 22,
-    depth: 18,
+    venueType: 'plein-air',
+    width: 30,
+    depth: 24,
     height: 8,
     audience: 250,
     ambient: 0.3,
-    haze: 0.2,
+    haze: 0.18,
     exposure: 1,
     bloom: 0.4,
-    timeOfDay: 'nuit',
-    floorTone: '#3a3129',
+    timeOfDay: 'jour',
+    floorTone: 'gazon-tondu',
     wallTone: '#15181d',
+    groundShape: 'rectangle',
+    polygon: [
+      { x: -15, z: -12 },
+      { x: 15, z: -12 },
+      { x: 15, z: 12 },
+      { x: -15, z: 12 },
+    ],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
     items: [],
     notes: '',
     createdAt: today(),
@@ -51,7 +71,7 @@ function emptyScene(entity: EntityId): Scene {
 
 export default function Studio() {
   const store = useStore();
-  const { db, visible, update, defaultEntity, toast, companyOf, nextNumber } = store;
+  const { db, visible, update, defaultEntity, toast, companyOf, nextNumber, categories } = store;
   const { focus, go } = useNav();
   const scenes = useMemo(() => visible(db.scenes), [db.scenes, visible]);
   const [sceneId, setSceneId] = useState<string | null>(focus ?? scenes[0]?.id ?? null);
@@ -59,87 +79,215 @@ export default function Studio() {
   const [adding, setAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [ready, setReady] = useState(false);
-  const [panel, setPanel] = useState<'lieu' | 'objets' | 'chiffrage'>('objets');
+  const [panel, setPanel] = useState<'objets' | 'terrain' | 'chiffrage'>('objets');
+  const [mode, setMode] = useState<TransformMode>('translate');
+  const [planMode, setPlanMode] = useState(false);
+  const [history, setHistory] = useState<{ past: Scene[]; future: Scene[] }>({ past: [], future: [] });
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<StudioEngine | null>(null);
-
   const scene = scenes.find((entry) => entry.id === sceneId) ?? null;
+  const sceneRef = useRef<Scene | null>(scene);
+  sceneRef.current = scene;
 
   useEffect(() => {
     if (!scenes.length) setSceneId(null);
     else if (!scenes.some((entry) => entry.id === sceneId)) setSceneId(scenes[0].id);
   }, [scenes, sceneId]);
 
-  /* Le moteur vit le temps de la vue ; la scene est reconstruite a chaque changement. */
+  /* ------------------------------------------------------------- mutations */
+
+  const pushHistory = useCallback(() => {
+    const current = sceneRef.current;
+    if (!current) return;
+    setHistory((state) => ({ past: [...state.past.slice(-29), structuredClone(current)], future: [] }));
+  }, []);
+
+  const patch = useCallback(
+    (changes: Partial<Scene>, snapshot = true) => {
+      if (snapshot) pushHistory();
+      update((draft) => {
+        const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+        if (target) Object.assign(target, changes);
+      });
+    },
+    [pushHistory, update],
+  );
+
+  const patchItem = useCallback(
+    (itemId: string, changes: Partial<SceneItem>, snapshot = true) => {
+      if (snapshot) pushHistory();
+      update((draft) => {
+        const item = draft.scenes.find((entry) => entry.id === sceneRef.current?.id)?.items.find((entry) => entry.id === itemId);
+        if (item) Object.assign(item, changes);
+      });
+    },
+    [pushHistory, update],
+  );
+
+  const undo = useCallback(() => {
+    setHistory((state) => {
+      const previous = state.past[state.past.length - 1];
+      const current = sceneRef.current;
+      if (!previous || !current) return state;
+      update((draft) => {
+        const index = draft.scenes.findIndex((entry) => entry.id === previous.id);
+        if (index >= 0) draft.scenes[index] = previous;
+      });
+      return { past: state.past.slice(0, -1), future: [structuredClone(current), ...state.future].slice(0, 30) };
+    });
+  }, [update]);
+
+  const redo = useCallback(() => {
+    setHistory((state) => {
+      const next = state.future[0];
+      const current = sceneRef.current;
+      if (!next || !current) return state;
+      update((draft) => {
+        const index = draft.scenes.findIndex((entry) => entry.id === next.id);
+        if (index >= 0) draft.scenes[index] = next;
+      });
+      return { past: [...state.past, structuredClone(current)], future: state.future.slice(1) };
+    });
+  }, [update]);
+
+  /* ---------------------------------------------------------------- moteur */
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const engine = new StudioEngine(host);
     engineRef.current = engine;
-    engine.onSelect = (itemId) => setSelected(itemId);
+    engine.handlers = {
+      onSelect: (itemId) => setSelected(itemId),
+      onTransform: (itemId, change) => patchItem(itemId, change),
+      onHover: () => {},
+    };
+    // Point d'accroche de diagnostic : utilise par les tests de rendu et le
+    // support pour verifier la chaine (ombres, passes, eclairage) en situation.
+    (window as unknown as { irtsStudio?: StudioEngine }).irtsStudio = engine;
     setReady(true);
     return () => {
       engine.dispose();
       engineRef.current = null;
       setReady(false);
     };
-  }, []);
+  }, [patchItem]);
 
-  const sceneKey = scene ? `${scene.id}|${scene.items.length}|${scene.venueType}|${scene.width}|${scene.depth}|${scene.height}|${scene.audience}|${scene.timeOfDay}|${scene.floorTone}|${scene.wallTone}|${scene.items.map((item) => `${item.id}${item.x}${item.y}${item.z}${item.rotY}${item.scale}${item.color}${item.beam}${item.qty}`).join()}` : '';
+  /** Cle de reconstruction : tout ce qui change la geometrie de la scene. */
+  const sceneKey = scene
+    ? [
+        scene.id,
+        scene.venueType,
+        scene.width,
+        scene.depth,
+        scene.height,
+        scene.audience,
+        scene.timeOfDay,
+        scene.floorTone,
+        scene.wallTone,
+        scene.sunAzimuth,
+        scene.quality,
+        scene.items
+          .map((item) =>
+            [item.id, item.model3d, item.x, item.y, item.z, item.rotX, item.rotY, item.scale, item.width, item.height, item.depth, item.color, item.beam, item.qty, item.locked].join(','),
+          )
+          .join('|'),
+      ].join('~')
+    : '';
 
   useEffect(() => {
     if (ready && scene) engineRef.current?.build(scene);
-    // La cle serialise tout ce qui change la geometrie : evite les reconstructions inutiles.
   }, [ready, sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (ready && scene) engineRef.current?.applySettings(scene);
-  }, [ready, scene?.exposure, scene?.bloom, scene?.haze, scene?.ambient]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, scene?.exposure, scene?.bloom, scene?.haze, scene?.ambient, scene?.showGrid, scene?.gridSnap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     engineRef.current?.selectById(selected);
-  }, [selected]);
+  }, [selected, sceneKey]);
 
-  const patch = useCallback(
-    (changes: Partial<Scene>) =>
-      update((draft) => {
-        const target = draft.scenes.find((entry) => entry.id === sceneId);
-        if (target) Object.assign(target, changes);
-      }),
-    [sceneId, update],
-  );
+  useEffect(() => {
+    engineRef.current?.setTransformMode(mode);
+  }, [mode]);
 
-  const patchItem = (itemId: string, changes: Partial<SceneItem>) =>
-    update((draft) => {
-      const item = draft.scenes.find((entry) => entry.id === sceneId)?.items.find((entry) => entry.id === itemId);
-      if (item) Object.assign(item, changes);
-    });
+  /* ------------------------------------------------------- raccourcis clavier */
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (key === 'd') setMode('translate');
+      if (key === 'r') setMode('rotate');
+      if (key === 't') setMode('scale');
+      if (key === 'g') patch({ showGrid: !sceneRef.current?.showGrid }, false);
+      if (key === 'p') {
+        const next = !engineRef.current?.isPlanMode();
+        engineRef.current?.setPlanMode(next);
+        setPlanMode(next);
+      }
+      if ((key === 'delete' || key === 'backspace') && selected) {
+        pushHistory();
+        update((draft) => {
+          const target2 = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+          if (target2) target2.items = target2.items.filter((entry) => entry.id !== selected);
+        });
+        setSelected(null);
+      }
+      if (key === 'escape') setSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, undo, redo, patch, pushHistory, update]);
+
+  /* ----------------------------------------------------------- chiffrage */
 
   const quote = useMemo(() => {
-    if (!scene) return { lines: [], total: 0 };
-    const lines = sceneToLines(scene, db.products);
-    return {
-      lines: lines.map((line) => ({
-        ...line,
-        product: db.products.find((product) => product.id === line.productId),
-      })),
-      total: sum(lines, (line) => line.qty * line.unitPrice),
-    };
+    if (!scene) return { lines: [], extras: [], total: 0 };
+    const { lines, extras } = sceneLines(scene, db.products);
+    return { lines, extras, total: sum(lines, (line) => line.qty * line.unitPrice) };
   }, [scene, db.products]);
 
+  /** Bilan technique : ce qu'il faut savoir avant de charger le camion. */
   const load = useMemo(() => {
-    if (!scene) return { power: 0, weight: 0 };
+    if (!scene) return { power: 0, weight: 0, surface: 0, seats: 0, volume: 0 };
     let power = 0;
     let weight = 0;
+    let surface = 0;
+    let seats = 0;
+    let volume = 0;
     for (const item of scene.items) {
-      const product = db.products.find((entry) => entry.id === item.productId);
-      if (!product) continue;
-      power += product.powerW * item.qty;
-      weight += product.weightKg * item.qty;
+      const def = objectDef(item.model3d);
+      const size = itemSize(item.model3d, item);
+      const product =
+        db.products.find((entry) => entry.id === item.productId) ??
+        (def.product ? db.products.find((entry) => entry.id === productIdForRef(def.product!.ref)) : undefined);
+      if (product) {
+        const units = billableUnits(item.model3d, size, item.qty);
+        power += product.powerW * units;
+        weight += product.weightKg * units;
+      }
+      if (def.family === 'Tentes & abris') surface += size[0] * size[2];
+      if (item.model3d === 'seating-block') seats += item.qty;
+      if (['chair', 'chaise-napoleon'].includes(item.model3d)) seats += 1;
+      if (item.model3d === 'table-brasserie') seats += 8;
+      if (item.model3d === 'table-round') seats += 10;
+      if (!['person', 'person-seated', 'arbre', 'voiture'].includes(item.model3d)) {
+        volume += size[0] * size[1] * size[2] * 0.35;
+      }
     }
-    return { power, weight };
+    return { power, weight, surface, seats, volume };
   }, [scene, db.products]);
+
+  /* -------------------------------------------------------------- exports */
 
   const exportImage = () => {
     const engine = engineRef.current;
@@ -151,26 +299,43 @@ export default function Studio() {
     toast('Rendu exporté en PNG.', 'succes');
   };
 
-  /** Fiche client : le rendu 3D accompagne la liste de matériel et le chiffrage. */
   const exportSheet = () => {
     const engine = engineRef.current;
     if (!engine || !scene) return;
-    const image = engine.screenshot();
+    const wasPlan = engine.isPlanMode();
+    engine.setPlanMode(true);
+    const plan = engine.screenshot();
+    engine.setPlanMode(false);
+    engine.setCamera('face');
+    const perspective = engine.screenshot();
+    if (wasPlan) engine.setPlanMode(true);
+
     const company = companyOf(scene.entity);
     const client = db.clients.find((entry) => entry.id === scene.clientId);
+    const byFamily = new Map<string, { label: string; qty: number; size: string }[]>();
+    for (const item of scene.items) {
+      const def = objectDef(item.model3d);
+      const [w, h, d] = itemSize(item.model3d, item);
+      const list = byFamily.get(def.family) ?? [];
+      list.push({ label: item.label, qty: item.qty, size: `${num(w, 2)} × ${num(h, 2)} × ${num(d, 2)} m` });
+      byFamily.set(def.family, list);
+    }
+
     const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${esc(scene.name)}</title>
 <style>
- @page { size: A4 landscape; margin: 12mm; }
- body { font-family: "Helvetica Neue", Arial, sans-serif; color:#16181d; margin:0; font-size:11px; }
- header { display:flex; align-items:center; gap:14px; border-bottom:3px solid ${company.accent}; padding-bottom:10px; margin-bottom:12px; }
+ @page { size: A4 landscape; margin: 10mm; }
+ body { font-family: "Helvetica Neue", Arial, sans-serif; color:#16181d; margin:0; font-size:10.5px; }
+ header { display:flex; align-items:center; gap:14px; border-bottom:3px solid ${company.accent}; padding-bottom:8px; margin-bottom:10px; }
  .logo { width:40px; height:40px; border-radius:9px; background:${company.accent}; color:#fff; display:grid; place-items:center; font-weight:700; }
  h1 { font-size:16px; margin:0; } .sub { color:#666; font-size:10px; }
- img { width:100%; border-radius:10px; display:block; }
- .cols { display:flex; gap:16px; margin-top:12px; }
- table { border-collapse:collapse; width:100%; } th,td { padding:5px 6px; border-bottom:1px solid #e6e8eb; text-align:left; }
- th { font-size:8.5px; text-transform:uppercase; letter-spacing:.06em; color:#7b8089; }
+ h2 { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:#7b8089; margin:12px 0 5px; }
+ img { width:100%; border-radius:8px; display:block; border:1px solid #dfe2e6; }
+ .cols { display:flex; gap:12px; } .cols > div { flex:1; }
+ table { border-collapse:collapse; width:100%; } th,td { padding:3px 5px; border-bottom:1px solid #e6e8eb; text-align:left; }
+ th { font-size:8px; text-transform:uppercase; letter-spacing:.06em; color:#7b8089; }
  .n { text-align:right; font-variant-numeric: tabular-nums; }
- .meta { display:flex; gap:20px; margin:10px 0; } .meta div span { display:block; font-size:8.5px; text-transform:uppercase; color:#7b8089; letter-spacing:.06em; }
+ .meta { display:flex; gap:16px; flex-wrap:wrap; margin:8px 0; }
+ .meta div span { display:block; font-size:8px; text-transform:uppercase; color:#7b8089; letter-spacing:.06em; }
  .noprint button { position:fixed; top:10px; right:10px; font:inherit; padding:8px 14px; border:0; border-radius:8px; background:${company.accent}; color:#fff; cursor:pointer; }
  @media print { .noprint { display:none; } }
 </style></head><body>
@@ -179,19 +344,39 @@ export default function Studio() {
  <div><h1>${esc(scene.name)}</h1>
  <div class="sub">${esc(company.legalName)} — ${client ? esc(client.name) : 'Projet interne'} — ${new Date().toLocaleDateString('fr-FR')}</div></div>
 </header>
+<div class="meta">
+ <div><span>Terrain</span>${num(scene.width)} × ${num(scene.depth)} m</div>
+ <div><span>Hauteur</span>${num(scene.height)} m</div>
+ <div><span>Type de lieu</span>${esc(scene.venueType)}</div>
+ <div><span>Sol</span>${esc(GROUND_KINDS.find((g) => g.id === scene.floorTone)?.label ?? scene.floorTone)}</div>
+ <div><span>Jauge</span>${num(scene.audience)} pers.</div>
+ <div><span>Surface couverte</span>${num(load.surface)} m²</div>
+ <div><span>Puissance</span>${num(load.power / 1000, 1)} kW</div>
+ <div><span>Poids matériel</span>${num(load.weight)} kg</div>
+ <div><span>Budget location / jour</span>${money(quote.total)}</div>
+</div>
 <div class="cols">
- <div style="flex:2"><img src="${image}" alt="Rendu 3D de l’implantation"></div>
- <div style="flex:1">
-  <div class="meta">
-   <div><span>Lieu</span>${esc(scene.venueType)}</div>
-   <div><span>Dimensions</span>${num(scene.width)} × ${num(scene.depth)} × ${num(scene.height)} m</div>
-   <div><span>Jauge</span>${num(scene.audience)} pers.</div>
-  </div>
-  <div class="meta">
-   <div><span>Puissance</span>${num(load.power / 1000, 1)} kW</div>
-   <div><span>Poids matériel</span>${num(load.weight)} kg</div>
-   <div><span>Budget location / jour</span>${money(quote.total)}</div>
-  </div>
+ <div><h2>Vue en plan</h2><img src="${plan}" alt="Plan d’implantation"></div>
+ <div><h2>Perspective</h2><img src="${perspective}" alt="Rendu perspective"></div>
+</div>
+<div class="cols" style="margin-top:10px">
+ <div>
+  <h2>Nomenclature</h2>
+  <table><thead><tr><th>Famille</th><th>Élément</th><th class="n">Qté</th><th class="n">Dimensions</th></tr></thead><tbody>
+  ${[...byFamily.entries()]
+    .map(([family, items]) =>
+      items
+        .map(
+          (entry, index) =>
+            `<tr><td>${index === 0 ? esc(family) : ''}</td><td>${esc(entry.label)}</td><td class="n">${entry.qty}</td><td class="n">${entry.size}</td></tr>`,
+        )
+        .join(''),
+    )
+    .join('')}
+  </tbody></table>
+ </div>
+ <div>
+  <h2>Chiffrage indicatif — base une journée</h2>
   <table><thead><tr><th>Matériel</th><th class="n">Qté</th><th class="n">P.U. HT</th><th class="n">Total</th></tr></thead><tbody>
   ${quote.lines
     .map(
@@ -199,8 +384,9 @@ export default function Studio() {
         `<tr><td>${esc(line.designation)}</td><td class="n">${line.qty}</td><td class="n">${money(line.unitPrice)}</td><td class="n">${money(line.qty * line.unitPrice)}</td></tr>`,
     )
     .join('')}
+  <tr><td colspan="3"><strong>Total HT / jour</strong></td><td class="n"><strong>${money(quote.total)}</strong></td></tr>
   </tbody></table>
-  ${scene.notes ? `<p style="color:#55595f;margin-top:10px">${esc(scene.notes)}</p>` : ''}
+  ${scene.notes ? `<h2>Notes</h2><p style="color:#55595f">${esc(scene.notes)}</p>` : ''}
  </div>
 </div>
 </body></html>`;
@@ -258,16 +444,55 @@ export default function Studio() {
     go('devis', id);
   };
 
+  const addObject = (model3d: string, count: number) => {
+    const def = objectDef(model3d);
+    const productId = def.product ? productIdForRef(def.product.ref) : null;
+    const family = categories('objet3d').find((entry) => entry.label === def.family);
+    pushHistory();
+    update((draft) => {
+      const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+      if (!target) return;
+      for (let index = 0; index < count; index += 1) {
+        const spread = count === 1 ? 0 : (index / (count - 1) - 0.5) * Math.min(target.width * 0.7, count * (def.size[0] + 0.4));
+        target.items.push({
+          id: uid('si'),
+          productId,
+          model3d,
+          label: count > 1 ? `${def.label} ${index + 1}` : def.label,
+          categoryId: family?.id ?? null,
+          qty: def.countable ? (model3d === 'seating-block' ? 120 : 48) : 1,
+          x: Number(spread.toFixed(2)),
+          y: def.defaultY,
+          z: -2,
+          rotY: 0,
+          rotX: 0,
+          scale: 1,
+          width: null,
+          height: null,
+          depth: null,
+          color: def.color ?? '#3987e5',
+          beam: def.beam ? 0.7 : 0,
+          locked: false,
+          notes: '',
+        });
+      }
+    });
+    setAdding(false);
+    toast(`${count} objet(s) ajouté(s).`, 'succes');
+  };
+
   const selectedItem = scene?.items.find((item) => item.id === selected) ?? null;
+  const selectedDef = selectedItem ? objectDef(selectedItem.model3d) : null;
+  const selectedSize = selectedItem ? itemSize(selectedItem.model3d, selectedItem) : null;
 
   return (
     <div className="view">
       <PageHeader
         title="Studio 3D"
-        subtitle="Construire l’environnement du client et lui montrer le rendu avant de signer"
+        subtitle="Concevoir le terrain, poser le matériel aux bonnes cotes et montrer le rendu au client"
         actions={
           <>
-            <select value={sceneId ?? ''} onChange={(event) => setSceneId(event.target.value)} style={{ width: 260 }}>
+            <select value={sceneId ?? ''} onChange={(event) => setSceneId(event.target.value)} style={{ width: 240 }}>
               {scenes.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.name}
@@ -299,7 +524,7 @@ export default function Studio() {
           <EmptyState
             mark="🎬"
             title="Aucune scène pour cette société"
-            hint="Créez une implantation pour visualiser le matériel dans l’espace du client."
+            hint="Créez un terrain aux dimensions du lieu, puis posez le matériel."
             action={
               <button
                 type="button"
@@ -316,19 +541,71 @@ export default function Studio() {
           />
         </Card>
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 14, alignItems: 'start' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 356px', gap: 14, alignItems: 'start' }}>
           <div className="stack">
-            <div className="viewer" style={{ height: 'min(64vh, 620px)' }}>
+            {/* --------------------------------------------------- barre d’outils */}
+            <div className="row row-wrap" style={{ gap: 8 }}>
+              <Segmented
+                value={mode}
+                options={MODES.map((entry) => ({ value: entry.id, label: entry.label }))}
+                onChange={(value) => setMode(value as TransformMode)}
+              />
+              <button
+                type="button"
+                className="btn"
+                aria-pressed={planMode}
+                style={planMode ? { background: 'var(--accent)', color: '#fff', borderColor: 'transparent' } : undefined}
+                onClick={() => {
+                  const next = !planMode;
+                  engineRef.current?.setPlanMode(next);
+                  setPlanMode(next);
+                }}
+              >
+                {planMode ? '⬛ Vue en plan' : '⬜ Vue en plan'}
+              </button>
+              <div className="row" style={{ gap: 4 }}>
+                <span className="small muted nowrap">Accrochage</span>
+                <select
+                  value={scene.gridSnap}
+                  onChange={(event) => patch({ gridSnap: Number(event.target.value) }, false)}
+                  style={{ width: 96 }}
+                >
+                  <option value={0}>Libre</option>
+                  <option value={0.1}>10 cm</option>
+                  <option value={0.25}>25 cm</option>
+                  <option value={0.5}>50 cm</option>
+                  <option value={1}>1 m</option>
+                </select>
+              </div>
+              <label className="row small nowrap" style={{ gap: 5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={scene.showGrid} onChange={(event) => patch({ showGrid: event.target.checked }, false)} />
+                Grille
+              </label>
+              <span className="spacer" />
+              <button type="button" className="btn btn-sm" onClick={undo} disabled={!history.past.length} title="Ctrl+Z">
+                ↶ Annuler
+              </button>
+              <button type="button" className="btn btn-sm" onClick={redo} disabled={!history.future.length} title="Ctrl+Maj+Z">
+                ↷ Rétablir
+              </button>
+            </div>
+
+            <div className="viewer" style={{ height: 'min(64vh, 640px)' }}>
               <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
               {!ready ? <div className="viewer-loading">Initialisation du moteur de rendu…</div> : null}
               <div className="viewer-hud">
                 <span>{scene.items.length} objets</span>
                 <span>
-                  {num(scene.width)} × {num(scene.depth)} × {num(scene.height)} m
+                  {num(scene.width)} × {num(scene.depth)} m
                 </span>
-                <span>{num(scene.audience)} personnes</span>
+                <span>{num(scene.audience)} pers.</span>
                 <span>{num(load.power / 1000, 1)} kW</span>
                 <span>{num(load.weight)} kg</span>
+                {selectedItem && selectedSize ? (
+                  <span style={{ color: 'var(--accent)' }}>
+                    {selectedItem.label} — {num(selectedSize[0], 2)} × {num(selectedSize[1], 2)} × {num(selectedSize[2], 2)} m
+                  </span>
+                ) : null}
               </div>
               <div className="viewer-tools">
                 {CAMERAS.map((camera) => (
@@ -337,7 +614,10 @@ export default function Studio() {
                     type="button"
                     className="btn btn-sm"
                     title={camera.hint}
-                    onClick={() => engineRef.current?.setCamera(camera.id)}
+                    onClick={() => {
+                      engineRef.current?.setCamera(camera.id);
+                      setPlanMode(camera.id === 'plan');
+                    }}
                   >
                     {camera.label}
                   </button>
@@ -350,7 +630,7 @@ export default function Studio() {
                 📷 Exporter le rendu (PNG)
               </button>
               <button type="button" className="btn" onClick={exportSheet}>
-                📄 Fiche d’implantation client
+                📄 Dossier d’implantation (plan + rendu + nomenclature)
               </button>
               <button
                 type="button"
@@ -368,29 +648,32 @@ export default function Studio() {
               </button>
             </div>
 
-            <div className="row small muted" style={{ gap: 14 }}>
-              <span>Clic gauche : sélectionner · Clic + glisser : orbiter · Molette : zoomer · Clic droit : déplacer</span>
+            <div className="small muted">
+              Clic : sélectionner · Glisser : orbiter · Molette : zoomer · Clic droit : déplacer la vue ·
+              <strong> D</strong> déplacer · <strong>R</strong> tourner · <strong>T</strong> dimensionner ·
+              <strong> P</strong> plan · <strong>G</strong> grille · <strong>Suppr</strong> supprimer ·
+              <strong> Ctrl+Z</strong> annuler
             </div>
           </div>
 
-          {/* ------------------------------------------------ panneau latéral */}
+          {/* --------------------------------------------------- panneau latéral */}
           <div className="stack">
             <div className="seg" style={{ width: '100%' }}>
-              {(['objets', 'lieu', 'chiffrage'] as const).map((id) => (
+              {(['objets', 'terrain', 'chiffrage'] as const).map((id) => (
                 <button key={id} type="button" aria-pressed={panel === id} onClick={() => setPanel(id)} style={{ flex: 1 }}>
-                  {id === 'objets' ? 'Objets' : id === 'lieu' ? 'Lieu' : 'Chiffrage'}
+                  {id === 'objets' ? 'Objets' : id === 'terrain' ? 'Terrain' : 'Chiffrage'}
                 </button>
               ))}
             </div>
 
-            {panel === 'lieu' ? (
+            {panel === 'terrain' ? (
               <Card>
                 <div className="stack" style={{ gap: 12 }}>
                   <Field label="Nom de l’implantation">
-                    <input value={scene.name} onChange={(event) => patch({ name: event.target.value })} />
+                    <input value={scene.name} onChange={(event) => patch({ name: event.target.value }, false)} />
                   </Field>
                   <Field label="Client">
-                    <select value={scene.clientId ?? ''} onChange={(event) => patch({ clientId: event.target.value || null })}>
+                    <select value={scene.clientId ?? ''} onChange={(event) => patch({ clientId: event.target.value || null }, false)}>
                       <option value="">— interne —</option>
                       {db.clients.map((client) => (
                         <option key={client.id} value={client.id}>
@@ -408,20 +691,104 @@ export default function Studio() {
                       ))}
                     </select>
                   </Field>
+                  <Field label="Nature du sol">
+                    <select value={scene.floorTone} onChange={(event) => patch({ floorTone: event.target.value })}>
+                      {GROUND_KINDS.map((ground) => (
+                        <option key={ground.id} value={ground.id}>
+                          {ground.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Forme de l’emprise" hint="Un terrain réel est rarement un rectangle parfait">
+                    <select
+                      value={scene.groundShape}
+                      onChange={(event) => patch({ groundShape: event.target.value as GroundShape })}
+                    >
+                      <option value="rectangle">Rectangle</option>
+                      <option value="l">Forme en L</option>
+                      <option value="cercle">Cercle</option>
+                      <option value="ovale">Ovale</option>
+                      <option value="polygone">Polygone libre</option>
+                    </select>
+                  </Field>
+                  {scene.groundShape === 'polygone' ? (
+                    <Field label="Sommets de l’emprise" hint="Coordonnées en mètres, dans l’ordre du contour">
+                      <div className="stack-sm">
+                        {scene.polygon.map((point, index) => (
+                          <div key={index} className="row" style={{ gap: 5 }}>
+                            <span className="small dim" style={{ width: 18 }}>
+                              {index + 1}
+                            </span>
+                            <input
+                              type="number"
+                              step={0.5}
+                              value={point.x}
+                              onChange={(event) =>
+                                patch({
+                                  polygon: scene.polygon.map((entry, i) =>
+                                    i === index ? { ...entry, x: Number(event.target.value) } : entry,
+                                  ),
+                                })
+                              }
+                            />
+                            <input
+                              type="number"
+                              step={0.5}
+                              value={point.z}
+                              onChange={(event) =>
+                                patch({
+                                  polygon: scene.polygon.map((entry, i) =>
+                                    i === index ? { ...entry, z: Number(event.target.value) } : entry,
+                                  ),
+                                })
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              disabled={scene.polygon.length <= 3}
+                              onClick={() => patch({ polygon: scene.polygon.filter((_, i) => i !== index) })}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            const last = scene.polygon[scene.polygon.length - 1] ?? { x: 0, z: 0 };
+                            patch({ polygon: [...scene.polygon, { x: last.x + 2, z: last.z }] });
+                          }}
+                        >
+                          + Sommet
+                        </button>
+                      </div>
+                    </Field>
+                  ) : null}
                   <div className="grid g3" style={{ gap: 8 }}>
                     <Field label="Largeur (m)">
-                      <input type="number" min={4} max={80} value={scene.width} onChange={(event) => patch({ width: Number(event.target.value) })} />
+                      <input type="number" min={4} max={200} step={0.5} value={scene.width} onChange={(event) => patch({ width: Number(event.target.value) })} />
                     </Field>
                     <Field label="Profondeur">
-                      <input type="number" min={4} max={80} value={scene.depth} onChange={(event) => patch({ depth: Number(event.target.value) })} />
+                      <input type="number" min={4} max={200} step={0.5} value={scene.depth} onChange={(event) => patch({ depth: Number(event.target.value) })} />
                     </Field>
                     <Field label="Hauteur">
-                      <input type="number" min={2.5} max={30} step={0.5} value={scene.height} onChange={(event) => patch({ height: Number(event.target.value) })} />
+                      <input type="number" min={2.5} max={40} step={0.5} value={scene.height} onChange={(event) => patch({ height: Number(event.target.value) })} />
                     </Field>
                   </div>
+                  <div className="small dim">
+                    Emprise : {num(groundArea(scene))} m² · surface couverte par les abris : {num(load.surface)} m² ·
+                    {' '}
+                    {num(load.seats)} places assises
+                  </div>
                   <Field label={`Jauge : ${num(scene.audience)} personnes`}>
-                    <input type="range" min={0} max={5000} step={50} value={scene.audience} onChange={(event) => patch({ audience: Number(event.target.value) })} />
+                    <input type="range" min={0} max={5000} step={25} value={scene.audience} onChange={(event) => patch({ audience: Number(event.target.value) }, false)} />
                   </Field>
+
+                  <hr className="hr" />
+                  <h3>Lumière & rendu</h3>
                   <Field label="Moment de la journée">
                     <Segmented
                       value={scene.timeOfDay}
@@ -433,31 +800,37 @@ export default function Studio() {
                       onChange={(value) => patch({ timeOfDay: value as Scene['timeOfDay'] })}
                     />
                   </Field>
-                  <div className="grid g2" style={{ gap: 8 }}>
-                    <Field label="Teinte du sol">
-                      <input type="color" value={scene.floorTone} onChange={(event) => patch({ floorTone: event.target.value })} />
-                    </Field>
-                    <Field label="Teinte des murs">
-                      <input type="color" value={scene.wallTone} onChange={(event) => patch({ wallTone: event.target.value })} />
-                    </Field>
-                  </div>
-
-                  <hr className="hr" />
-                  <h3>Rendu</h3>
-                  <Field label={`Lumière d’ambiance — ${num(scene.ambient * 100)} %`}>
-                    <input type="range" min={0} max={1} step={0.02} value={scene.ambient} onChange={(event) => patch({ ambient: Number(event.target.value) })} />
+                  <Field label={`Orientation du soleil — ${num(scene.sunAzimuth)}°`}>
+                    <input type="range" min={0} max={360} step={5} value={scene.sunAzimuth} onChange={(event) => patch({ sunAzimuth: Number(event.target.value) })} />
                   </Field>
-                  <Field label={`Brouillard (visibilité des faisceaux) — ${num(scene.haze * 100)} %`}>
-                    <input type="range" min={0} max={1} step={0.02} value={scene.haze} onChange={(event) => patch({ haze: Number(event.target.value) })} />
+                  <Field label="Qualité de rendu" hint="« Photo » ajoute l’anticrénelage et affine l’occlusion ambiante">
+                    <Segmented
+                      value={scene.quality}
+                      options={[
+                        { value: 'rapide', label: 'Rapide' },
+                        { value: 'equilibre', label: 'Équilibré' },
+                        { value: 'photo', label: 'Photo' },
+                      ]}
+                      onChange={(value) => patch({ quality: value as Scene['quality'] })}
+                    />
+                  </Field>
+                  <Field label={`Lumière d’ambiance — ${num(scene.ambient * 100)} %`}>
+                    <input type="range" min={0} max={1} step={0.02} value={scene.ambient} onChange={(event) => patch({ ambient: Number(event.target.value) }, false)} />
+                  </Field>
+                  <Field label={`Brouillard — ${num(scene.haze * 100)} %`}>
+                    <input type="range" min={0} max={1} step={0.02} value={scene.haze} onChange={(event) => patch({ haze: Number(event.target.value) }, false)} />
                   </Field>
                   <Field label={`Exposition — ${num(scene.exposure, 2)}`}>
-                    <input type="range" min={0.4} max={2} step={0.02} value={scene.exposure} onChange={(event) => patch({ exposure: Number(event.target.value) })} />
+                    <input type="range" min={0.4} max={2} step={0.02} value={scene.exposure} onChange={(event) => patch({ exposure: Number(event.target.value) }, false)} />
                   </Field>
                   <Field label={`Halo lumineux — ${num(scene.bloom, 2)}`}>
-                    <input type="range" min={0} max={1.6} step={0.02} value={scene.bloom} onChange={(event) => patch({ bloom: Number(event.target.value) })} />
+                    <input type="range" min={0} max={1.6} step={0.02} value={scene.bloom} onChange={(event) => patch({ bloom: Number(event.target.value) }, false)} />
+                  </Field>
+                  <Field label="Couleur des murs">
+                    <input type="color" value={scene.wallTone} onChange={(event) => patch({ wallTone: event.target.value }, false)} />
                   </Field>
                   <Field label="Notes">
-                    <textarea rows={3} value={scene.notes} onChange={(event) => patch({ notes: event.target.value })} />
+                    <textarea rows={3} value={scene.notes} onChange={(event) => patch({ notes: event.target.value }, false)} />
                   </Field>
                 </div>
               </Card>
@@ -466,63 +839,155 @@ export default function Studio() {
             {panel === 'objets' ? (
               <div className="stack">
                 <Card>
-                  <button type="button" className="btn btn-primary btn-block" onClick={() => setAdding(true)}>
-                    + Ajouter du matériel
-                  </button>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => setAdding(true)}>
+                      + Ajouter un objet
+                    </button>
+                    <ManageCategoriesButton domain="objet3d" label="Familles" />
+                  </div>
                 </Card>
 
-                {selectedItem ? (
-                  <Card title={selectedItem.label} subtitle="Objet sélectionné">
+                {selectedItem && selectedDef && selectedSize ? (
+                  <Card title={selectedItem.label} subtitle={`${selectedDef.family} · ${selectedDef.label}`}>
                     <div className="stack" style={{ gap: 10 }}>
+                      <SelectedProductCard item={selectedItem} size={selectedSize} />
+                      <Field label="Nom affiché">
+                        <input value={selectedItem.label} onChange={(event) => patchItem(selectedItem.id, { label: event.target.value }, false)} />
+                      </Field>
+                      <Field label="Famille">
+                        <CategorySelect
+                          domain="objet3d"
+                          value={selectedItem.categoryId}
+                          onChange={(id) => patchItem(selectedItem.id, { categoryId: id }, false)}
+                        />
+                      </Field>
+
+                      <h3>Dimensions (m)</h3>
                       <div className="grid g3" style={{ gap: 8 }}>
-                        <Field label="X (m)">
-                          <input type="number" step={0.25} value={selectedItem.x} onChange={(event) => patchItem(selectedItem.id, { x: Number(event.target.value) })} />
+                        <Field label="Largeur">
+                          <input
+                            type="number"
+                            min={0.05}
+                            step={0.05}
+                            value={num(selectedSize[0], 2).replace(',', '.')}
+                            disabled={!selectedDef.resizable}
+                            onChange={(event) => patchItem(selectedItem.id, { width: Number(event.target.value) })}
+                          />
                         </Field>
                         <Field label="Hauteur">
+                          <input
+                            type="number"
+                            min={0.05}
+                            step={0.05}
+                            value={num(selectedSize[1], 2).replace(',', '.')}
+                            disabled={!selectedDef.resizable}
+                            onChange={(event) => patchItem(selectedItem.id, { height: Number(event.target.value) })}
+                          />
+                        </Field>
+                        <Field label="Profondeur">
+                          <input
+                            type="number"
+                            min={0.05}
+                            step={0.05}
+                            value={num(selectedSize[2], 2).replace(',', '.')}
+                            disabled={!selectedDef.resizable}
+                            onChange={(event) => patchItem(selectedItem.id, { depth: Number(event.target.value) })}
+                          />
+                        </Field>
+                      </div>
+                      {!selectedDef.resizable ? (
+                        <div className="small dim">
+                          Matériel au gabarit fixe : ses cotes sont celles du produit réel.
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => patchItem(selectedItem.id, { width: null, height: null, depth: null })}
+                        >
+                          Revenir aux dimensions d’origine
+                        </button>
+                      )}
+
+                      <h3>Position (m)</h3>
+                      <div className="grid g3" style={{ gap: 8 }}>
+                        <Field label="X — cour/jardin">
+                          <input type="number" step={0.25} value={selectedItem.x} onChange={(event) => patchItem(selectedItem.id, { x: Number(event.target.value) })} />
+                        </Field>
+                        <Field label="Y — hauteur">
                           <input type="number" step={0.25} value={selectedItem.y} onChange={(event) => patchItem(selectedItem.id, { y: Number(event.target.value) })} />
                         </Field>
-                        <Field label="Z (m)">
+                        <Field label="Z — avant/arrière">
                           <input type="number" step={0.25} value={selectedItem.z} onChange={(event) => patchItem(selectedItem.id, { z: Number(event.target.value) })} />
                         </Field>
                       </div>
                       <Field label={`Rotation — ${num((selectedItem.rotY * 180) / Math.PI)}°`}>
-                        <input type="range" min={-3.15} max={3.15} step={0.05} value={selectedItem.rotY} onChange={(event) => patchItem(selectedItem.id, { rotY: Number(event.target.value) })} />
+                        <input type="range" min={-3.15} max={3.15} step={0.02} value={selectedItem.rotY} onChange={(event) => patchItem(selectedItem.id, { rotY: Number(event.target.value) }, false)} />
                       </Field>
-                      <Field label={`Échelle — ${num(selectedItem.scale, 2)}`}>
-                        <input type="range" min={0.3} max={3} step={0.05} value={selectedItem.scale} onChange={(event) => patchItem(selectedItem.id, { scale: Number(event.target.value) })} />
+                      <Field label={`Inclinaison — ${num((selectedItem.rotX * 180) / Math.PI)}°`}>
+                        <input type="range" min={-1.2} max={1.2} step={0.02} value={selectedItem.rotX} onChange={(event) => patchItem(selectedItem.id, { rotX: Number(event.target.value) }, false)} />
                       </Field>
+
                       <div className="grid g2" style={{ gap: 8 }}>
-                        <Field label="Quantité">
+                        <Field label={selectedDef.countable ? 'Quantité (unités)' : 'Quantité facturée'}>
                           <input type="number" min={1} value={selectedItem.qty} onChange={(event) => patchItem(selectedItem.id, { qty: Number(event.target.value) })} />
                         </Field>
                         <Field label="Couleur">
                           <input type="color" value={selectedItem.color} onChange={(event) => patchItem(selectedItem.id, { color: event.target.value })} />
                         </Field>
                       </div>
-                      <Field label={`Intensité du faisceau — ${num(selectedItem.beam * 100)} %`}>
-                        <input type="range" min={0} max={1} step={0.05} value={selectedItem.beam} onChange={(event) => patchItem(selectedItem.id, { beam: Number(event.target.value) })} />
+                      {selectedDef.beam ? (
+                        <Field label={`Intensité du faisceau — ${num(selectedItem.beam * 100)} %`}>
+                          <input type="range" min={0} max={1} step={0.05} value={selectedItem.beam} onChange={(event) => patchItem(selectedItem.id, { beam: Number(event.target.value) })} />
+                        </Field>
+                      ) : null}
+                      <Field label="Matériel du catalogue" hint="Sert au chiffrage automatique">
+                        <select
+                          value={selectedItem.productId ?? ''}
+                          onChange={(event) => patchItem(selectedItem.id, { productId: event.target.value || null }, false)}
+                        >
+                          <option value="">— non facturé —</option>
+                          {db.products
+                            .filter((product) => product.active)
+                            .map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {product.name}
+                              </option>
+                            ))}
+                        </select>
                       </Field>
+
                       <div className="row" style={{ gap: 6 }}>
+                        <label className="row small nowrap" style={{ gap: 5, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedItem.locked}
+                            onChange={(event) => patchItem(selectedItem.id, { locked: event.target.checked })}
+                          />
+                          Verrouillé
+                        </label>
+                        <span className="spacer" />
                         <button
                           type="button"
                           className="btn btn-sm"
-                          onClick={() =>
+                          onClick={() => {
+                            pushHistory();
                             update((draft) => {
-                              const target = draft.scenes.find((entry) => entry.id === sceneId);
+                              const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
                               if (!target) return;
-                              target.items.push({ ...structuredClone(selectedItem), id: uid('si'), x: selectedItem.x + 1.2 });
-                            })
-                          }
+                              target.items.push({ ...structuredClone(selectedItem), id: uid('si'), x: selectedItem.x + selectedSize[0] + 0.3 });
+                            });
+                          }}
                         >
                           Dupliquer
                         </button>
-                        <span className="spacer" />
                         <button
                           type="button"
                           className="btn btn-sm btn-danger"
                           onClick={() => {
+                            pushHistory();
                             update((draft) => {
-                              const target = draft.scenes.find((entry) => entry.id === sceneId);
+                              const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
                               if (target) target.items = target.items.filter((item) => item.id !== selectedItem.id);
                             });
                             setSelected(null);
@@ -536,119 +1001,195 @@ export default function Studio() {
                 ) : null}
 
                 <Card title="Objets de la scène" subtitle={`${scene.items.length} élément(s)`} flush>
-                  <div style={{ maxHeight: 330, overflowY: 'auto' }}>
-                    {scene.items.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="row"
-                        style={{
-                          width: '100%',
-                          gap: 8,
-                          padding: '7px 14px',
-                          background: selected === item.id ? 'var(--surface-3)' : 'transparent',
-                          border: 0,
-                          borderBottom: '1px solid var(--line-soft)',
-                          color: 'inherit',
-                          font: 'inherit',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                        onClick={() => setSelected(item.id)}
-                      >
-                        <span className="scope-dot" style={{ background: item.beam > 0 ? item.color : 'var(--ink-4)' }} />
-                        <span className="truncate" style={{ flex: 1, fontSize: 12.5 }}>
-                          {item.label}
-                        </span>
-                        <span className="small dim tnum">{item.qty > 1 ? `×${item.qty}` : ''}</span>
-                      </button>
-                    ))}
-                    {!scene.items.length ? <EmptyState mark="🎚️" title="Scène vide" hint="Ajoutez du matériel du catalogue." /> : null}
+                  <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                    {scene.items.map((item) => {
+                      const def = objectDef(item.model3d);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="row"
+                          style={{
+                            width: '100%',
+                            gap: 8,
+                            padding: '7px 14px',
+                            background: selected === item.id ? 'var(--surface-3)' : 'transparent',
+                            border: 0,
+                            borderBottom: '1px solid var(--line-soft)',
+                            color: 'inherit',
+                            font: 'inherit',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                          onClick={() => setSelected(item.id)}
+                        >
+                          <span aria-hidden="true">{def.icon}</span>
+                          <span className="truncate" style={{ flex: 1, fontSize: 12.5 }}>
+                            {item.label}
+                          </span>
+                          {item.locked ? <span className="small dim">🔒</span> : null}
+                          <span className="small dim tnum">{item.qty > 1 ? `×${item.qty}` : ''}</span>
+                        </button>
+                      );
+                    })}
+                    {!scene.items.length ? <EmptyState mark="🎚️" title="Scène vide" hint="Ajoutez un objet de la bibliothèque." /> : null}
                   </div>
                 </Card>
               </div>
             ) : null}
 
             {panel === 'chiffrage' ? (
-              <Card title="Chiffrage de l’implantation" subtitle="Tarifs catalogue, base une journée">
-                <div className="stack-sm">
-                  {quote.lines.map((line) => (
-                    <div key={line.productId} className="row small" style={{ gap: 8, padding: '5px 0', borderBottom: '1px solid var(--line-soft)' }}>
-                      <span className="truncate" style={{ flex: 1 }}>
-                        {line.designation}
-                      </span>
-                      <span className="dim tnum">× {line.qty}</span>
-                      <span className="tnum" style={{ minWidth: 76, textAlign: 'right' }}>
-                        {money(line.qty * line.unitPrice)}
-                      </span>
+              <div className="stack">
+                <Card
+                  title="Devis de l’implantation"
+                  subtitle="Chaque objet posé, sa description, ses cotes et son prix"
+                  flush
+                >
+                  <div className="table-wrap">
+                    <table className="data">
+                      <thead>
+                        <tr>
+                          <th>Désignation</th>
+                          <th className="num">Qté</th>
+                          <th className="num">P.U. HT</th>
+                          <th className="num">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {quote.lines.map((line) => {
+                          const product = db.products.find((entry) => entry.id === line.productId);
+                          return (
+                            <tr
+                              key={line.id}
+                              className="clickable"
+                              onClick={() => setSelected(line.itemIds[0] ?? null)}
+                            >
+                              <td>
+                                <div style={{ fontSize: 12.5 }}>{line.designation}</div>
+                                <div className="small dim">{line.description}</div>
+                                {product?.unit ? <div className="small dim">Facturé au {product.unit}</div> : null}
+                              </td>
+                              <td className="num tnum">{num(line.qty)}</td>
+                              <td className="num tnum">{money(line.unitPrice)}</td>
+                              <td className="num tnum" style={{ fontWeight: 600 }}>
+                                {money(line.qty * line.unitPrice)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {!quote.lines.length ? (
+                          <tr>
+                            <td colSpan={4} className="center dim" style={{ padding: 20 }}>
+                              Aucun matériel facturable dans cette scène.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={3}>Total HT pour une journée</td>
+                          <td className="num tnum">{money(quote.total)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </Card>
+
+                {quote.extras.length ? (
+                  <Card title="Éléments non facturés" subtitle="Décor du site et repères d’échelle">
+                    <div className="stack-sm">
+                      {quote.extras.map((extra) => (
+                        <button
+                          key={extra.itemId}
+                          type="button"
+                          className="row small"
+                          style={{
+                            gap: 8,
+                            background: 'transparent',
+                            border: 0,
+                            padding: '4px 0',
+                            color: 'inherit',
+                            font: 'inherit',
+                            width: '100%',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => setSelected(extra.itemId)}
+                        >
+                          <span className="truncate" style={{ flex: 1 }}>
+                            {extra.label}
+                          </span>
+                          <span className="dim tnum">
+                            {num(extra.size[0], 2)} × {num(extra.size[1], 2)} × {num(extra.size[2], 2)} m
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
-                  {!quote.lines.length ? <span className="small dim">Aucun matériel chiffrable dans cette scène.</span> : null}
-                </div>
-                <hr className="hr" />
-                <div className="totals">
-                  <div className="totals-row">
-                    <span className="muted">Puissance appelée</span>
-                    <span className="tnum">{num(load.power / 1000, 1)} kW</span>
-                  </div>
-                  <div className="totals-row">
-                    <span className="muted">Poids total</span>
-                    <span className="tnum">{num(load.weight)} kg</span>
-                  </div>
-                  <div className="totals-row grand">
-                    <span>Total / jour HT</span>
-                    <span className="tnum">{money0(quote.total)}</span>
-                  </div>
-                </div>
-                {load.power > 32000 ? (
-                  <div style={{ marginTop: 10 }}>
-                    <Badge tone="warning" icon="⚡">
-                      Au-delà de 32 kW : prévoir un groupe électrogène ou une armoire dédiée
-                    </Badge>
-                  </div>
+                  </Card>
                 ) : null}
-                <button type="button" className="btn btn-primary btn-block" style={{ marginTop: 12 }} onClick={createQuote} disabled={!quote.lines.length}>
-                  Générer le devis
-                </button>
-              </Card>
+
+                <Card title="Bilan technique">
+                  <div className="totals">
+                    <div className="totals-row">
+                      <span className="muted">Surface du terrain</span>
+                      <span className="tnum">{num(groundArea(scene))} m²</span>
+                    </div>
+                    <div className="totals-row">
+                      <span className="muted">Surface couverte</span>
+                      <span className="tnum">{num(load.surface)} m²</span>
+                    </div>
+                    <div className="totals-row">
+                      <span className="muted">Places assises</span>
+                      <span className="tnum">{num(load.seats)}</span>
+                    </div>
+                    <div className="totals-row">
+                      <span className="muted">Puissance appelée</span>
+                      <span className="tnum">{num(load.power / 1000, 1)} kW</span>
+                    </div>
+                    <div className="totals-row">
+                      <span className="muted">Poids matériel</span>
+                      <span className="tnum">{num(load.weight)} kg</span>
+                    </div>
+                    <div className="totals-row">
+                      <span className="muted">Volume de transport estimé</span>
+                      <span className="tnum">{num(load.volume, 1)} m³</span>
+                    </div>
+                    <div className="totals-row grand">
+                      <span>Total / jour HT</span>
+                      <span className="tnum">{money0(quote.total)}</span>
+                    </div>
+                  </div>
+                  {load.power > 32000 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <Badge tone="warning" icon="⚡">
+                        Au-delà de 32 kW : prévoir un groupe électrogène ou une armoire dédiée
+                      </Badge>
+                    </div>
+                  ) : null}
+                  {load.volume > 20 ? (
+                    <div style={{ marginTop: 8 }}>
+                      <Badge tone="info" icon="🚚">
+                        Plus de 20 m³ : prévoir deux rotations ou un porteur
+                      </Badge>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-block"
+                    style={{ marginTop: 12 }}
+                    onClick={createQuote}
+                    disabled={!quote.lines.length}
+                  >
+                    Générer le devis
+                  </button>
+                </Card>
+              </div>
             ) : null}
           </div>
         </div>
       )}
 
-      {adding && scene ? (
-        <AddGearDialog
-          entity={scene.entity}
-          onClose={() => setAdding(false)}
-          onAdd={(productId, count) => {
-            const product = db.products.find((entry) => entry.id === productId);
-            if (!product?.model3d) return;
-            update((draft) => {
-              const target = draft.scenes.find((entry) => entry.id === sceneId);
-              if (!target) return;
-              for (let index = 0; index < count; index += 1) {
-                const spread = count === 1 ? 0 : (index / (count - 1) - 0.5) * Math.min(target.width * 0.7, count * 1.2);
-                target.items.push({
-                  id: uid('si'),
-                  productId: product.id,
-                  model3d: product.model3d!,
-                  label: `${product.name}${count > 1 ? ` ${index + 1}` : ''}`,
-                  qty: 1,
-                  x: Number(spread.toFixed(2)),
-                  y: ['moving-head', 'blinder', 'line-array'].includes(product.model3d!) ? 6 : 0,
-                  z: -2,
-                  rotY: 0,
-                  scale: 1,
-                  color: '#3987e5',
-                  beam: ['moving-head', 'par-led', 'blinder'].includes(product.model3d!) ? 0.7 : 0,
-                });
-              }
-            });
-            setAdding(false);
-            toast(`${count} objet(s) ajouté(s).`, 'succes');
-          }}
-        />
-      ) : null}
+      {adding && scene ? <ObjectLibraryDialog onClose={() => setAdding(false)} onAdd={addObject} /> : null}
 
       {confirmDelete && scene ? (
         <ConfirmDialog
@@ -669,64 +1210,146 @@ export default function Studio() {
   );
 }
 
-function AddGearDialog({
-  entity,
+/** Rappel commercial de l'objet selectionne : ce qui partira dans le devis. */
+function SelectedProductCard({ item, size }: { item: SceneItem; size: [number, number, number] }) {
+  const { db } = useStore();
+  const def = objectDef(item.model3d);
+  const product =
+    db.products.find((entry) => entry.id === item.productId) ??
+    (def.product ? db.products.find((entry) => entry.id === productIdForRef(def.product!.ref)) : undefined);
+
+  if (!product) {
+    return (
+      <div className="card" style={{ background: 'var(--surface-2)', padding: 10 }}>
+        <div className="small dim">Élément de décor — non facturé</div>
+        <div className="small muted" style={{ marginTop: 4 }}>
+          {num(size[0], 2)} × {num(size[1], 2)} × {num(size[2], 2)} m
+        </div>
+      </div>
+    );
+  }
+
+  const units = billableUnits(item.model3d, size, item.qty);
+  const unitPrice = product.mode === 'vente' ? product.priceSale : product.priceDay;
+  return (
+    <div className="card" style={{ background: 'var(--surface-2)', padding: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 570 }}>{product.name}</div>
+      <div className="small dim">
+        {product.brand} {product.model} · réf. {product.ref}
+      </div>
+      <div className="small muted" style={{ marginTop: 6 }}>
+        L {num(size[0], 2)} × H {num(size[1], 2)} × P {num(size[2], 2)} m
+      </div>
+      {Object.entries(product.specs).slice(0, 3).map(([key, value]) => (
+        <div className="small dim" key={key}>
+          {key} : {value}
+        </div>
+      ))}
+      <div className="row" style={{ marginTop: 8 }}>
+        <span className="small muted">
+          {num(units)} {product.unit}
+          {units > 1 ? 's' : ''} × {money(unitPrice)}
+        </span>
+        <span className="spacer" />
+        <span className="tnum" style={{ fontWeight: 600, color: 'var(--accent)' }}>
+          {money(units * unitPrice)}
+        </span>
+      </div>
+      {product.powerW ? (
+        <div className="small dim" style={{ marginTop: 2 }}>
+          {num(product.powerW * units)} W · {num(product.weightKg * units)} kg
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* --------------------------------------------------- bibliothèque d’objets */
+
+function ObjectLibraryDialog({
   onAdd,
   onClose,
 }: {
-  entity: EntityId;
-  onAdd: (productId: string, count: number) => void;
+  onAdd: (model3d: string, count: number) => void;
   onClose: () => void;
 }) {
-  const { db } = useStore();
+  const { categories } = useStore();
   const [query, setQuery] = useState('');
+  const [family, setFamily] = useState('toutes');
   const [count, setCount] = useState(1);
-  const items = db.products.filter(
-    (product) =>
-      product.model3d &&
-      (product.entity === entity || true) &&
-      `${product.name} ${product.category} ${product.brand}`.toLowerCase().includes(query.toLowerCase()),
+
+  const families = categories('objet3d');
+  const items = OBJECT_LIBRARY.filter((entry) => (family === 'toutes' ? true : entry.family === family)).filter((entry) =>
+    `${entry.label} ${entry.family} ${entry.product?.brand ?? ''} ${entry.product?.name ?? ''} ${entry.hint ?? ''}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
   );
 
   return (
-    <Modal title="Ajouter du matériel à la scène" size="lg" onClose={onClose}>
-      <div className="row" style={{ gap: 10, marginBottom: 12 }}>
-        <div className="search" style={{ flex: 1 }}>
-          <input autoFocus placeholder="Rechercher…" value={query} onChange={(event) => setQuery(event.target.value)} />
+    <Modal
+      title="Bibliothèque d’objets"
+      subtitle={`${OBJECT_LIBRARY.length} références — son, lumière, vidéo, structure, mobilier, bar, abris, sanitaires, décor, logistique et sécurité`}
+      size="xl"
+      onClose={onClose}
+    >
+      <div className="row row-wrap" style={{ gap: 10, marginBottom: 12 }}>
+        <div className="search" style={{ flex: 1, minWidth: 220 }}>
+          <input autoFocus placeholder="Rechercher un objet…" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
-        <Field label="">
-          <div className="row" style={{ gap: 6 }}>
-            <span className="small muted nowrap">Quantité</span>
-            <input type="number" min={1} max={48} value={count} onChange={(event) => setCount(Number(event.target.value))} style={{ width: 80 }} />
-          </div>
-        </Field>
+        <select value={family} onChange={(event) => setFamily(event.target.value)} style={{ width: 210 }}>
+          <option value="toutes">Toutes les familles</option>
+          {families.map((category) => (
+            <option key={category.id} value={category.label}>
+              {category.icon} {category.label}
+            </option>
+          ))}
+        </select>
+        <div className="row" style={{ gap: 6 }}>
+          <span className="small muted nowrap">Quantité</span>
+          <input type="number" min={1} max={64} value={count} onChange={(event) => setCount(Number(event.target.value))} style={{ width: 78 }} />
+        </div>
+        <ManageCategoriesButton domain="objet3d" label="Familles" />
       </div>
-      <div className="grid g3" style={{ maxHeight: 420, overflowY: 'auto', gap: 8 }}>
-        {items.map((product) => (
+
+      <div className="grid g4" style={{ maxHeight: '58vh', overflowY: 'auto', gap: 8 }}>
+        {items.map((entry) => (
           <button
-            key={product.id}
+            key={entry.id}
             type="button"
             className="card"
             style={{ cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }}
-            onClick={() => onAdd(product.id, count)}
+            onClick={() => onAdd(entry.id, count)}
           >
             <div className="row" style={{ gap: 8 }}>
-              <span style={{ fontSize: 20 }}>{product.mark}</span>
+              <span style={{ fontSize: 22 }}>{entry.icon}</span>
               <div style={{ minWidth: 0 }}>
                 <div className="truncate" style={{ fontSize: 12.5, fontWeight: 570 }}>
-                  {product.name}
+                  {entry.label}
                 </div>
-                <div className="small dim truncate">{product.category}</div>
+                <div className="small dim truncate">{entry.family}</div>
               </div>
             </div>
-            <div className="row small muted" style={{ marginTop: 8 }}>
-              <span>{money(product.mode === 'vente' ? product.priceSale : product.priceDay)}</span>
-              <span className="spacer" />
-              <span className="dim">{product.model3d}</span>
+            {entry.product ? (
+              <div className="small dim truncate" style={{ marginTop: 6 }}>
+                {entry.product.brand} {entry.product.model}
+              </div>
+            ) : null}
+            <div className="small muted" style={{ marginTop: 4 }}>
+              {num(entry.size[0], 2)} × {num(entry.size[1], 2)} × {num(entry.size[2], 2)} m
+              {entry.resizable ? <span className="dim"> · redimensionnable</span> : null}
             </div>
+            {entry.hint ? <div className="small dim" style={{ marginTop: 4 }}>{entry.hint}</div> : null}
+            {entry.product ? (
+              <div className="small" style={{ marginTop: 6, color: 'var(--accent)' }}>
+                {money(entry.product.mode === 'vente' ? entry.product.priceSale : entry.product.priceDay)} / {entry.product.unit}
+                {entry.product.mode === 'location' ? ' / jour' : ''}
+              </div>
+            ) : (
+              <div className="small dim" style={{ marginTop: 6 }}>Décor — non facturé</div>
+            )}
           </button>
         ))}
-        {!items.length ? <EmptyState mark="🔍" title="Aucun matériel représentable en 3D" /> : null}
+        {!items.length ? <EmptyState mark="🔍" title="Aucun objet ne correspond" /> : null}
       </div>
     </Modal>
   );

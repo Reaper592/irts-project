@@ -4,10 +4,13 @@ import { createSeedDatabase } from '../core/seed';
 import type { Company, Database, EntityId } from '../core/types';
 import { downloadFile, money0, num, today } from '../core/utils';
 import { Badge, Card, ConfirmDialog, EmptyState, Field, PageHeader, Tabs } from '../ui/kit';
+import { CategoryManager, DOMAIN_LABEL } from '../ui/CategoryManager';
+import type { TaxonomyDomain } from '../core/types';
 
 export default function Parametres() {
-  const { db, update, replace, reset, toast } = useStore();
-  const [tab, setTab] = useState<EntityId | 'donnees' | 'general'>('general');
+  const { db, update, replace, reset, toast, sync } = useStore();
+  const [tab, setTab] = useState<EntityId | 'donnees' | 'general' | 'categories' | 'reseau'>('general');
+  const [domain, setDomain] = useState<TaxonomyDomain | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -51,6 +54,8 @@ export default function Parametres() {
         onChange={(id) => setTab(id as typeof tab)}
         tabs={[
           { id: 'general', label: 'Général' },
+          { id: 'categories', label: 'Catégories' },
+          { id: 'reseau', label: 'Partage réseau' },
           ...db.companies.map((company) => ({ id: company.id, label: company.name })),
           { id: 'donnees', label: 'Données' },
         ]}
@@ -145,6 +150,134 @@ export default function Parametres() {
             <p className="small muted" style={{ marginTop: 10 }}>
               La numérotation est continue et sans rupture, comme l’exige la réglementation française sur la facturation.
               Elle s’incrémente automatiquement à chaque création de document.
+            </p>
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === 'categories' ? (
+        <div className="stack">
+          <Card title="Domaines de classement" subtitle="Chaque liste de l’application se règle ici — ou depuis son propre menu">
+            <div className="grid g3">
+              {(Object.keys(DOMAIN_LABEL) as TaxonomyDomain[]).map((entry) => {
+                const count = db.categories.filter((category) => category.domain === entry && !category.archived).length;
+                return (
+                  <button
+                    key={entry}
+                    type="button"
+                    className="card"
+                    style={{ cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }}
+                    onClick={() => setDomain(entry)}
+                  >
+                    <div style={{ fontWeight: 570, fontSize: 13 }}>{DOMAIN_LABEL[entry]}</div>
+                    <div className="small dim" style={{ marginTop: 6 }}>
+                      {count} catégorie(s)
+                    </div>
+                    <div className="row row-wrap" style={{ gap: 4, marginTop: 8 }}>
+                      {db.categories
+                        .filter((category) => category.domain === entry && !category.archived)
+                        .slice(0, 6)
+                        .map((category) => (
+                          <span key={category.id} className="chip" style={{ borderColor: category.color }}>
+                            {category.icon} {category.label}
+                          </span>
+                        ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+          <Card title="Comment cela fonctionne">
+            <p className="small muted" style={{ margin: 0 }}>
+              Une catégorie porte un nom, une couleur, un pictogramme, une portée — une société ou tout le groupe — et,
+              si besoin, des paramètres imposés à tous ses éléments : puissance d’un projecteur, surface couverte d’une
+              tente, pitch d’une dalle LED. Ces paramètres apparaissent alors dans le formulaire de la fiche. À la
+              suppression d’une catégorie, l’application demande vers quelle autre reclasser les éléments : rien n’est
+              laissé orphelin.
+            </p>
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === 'reseau' ? (
+        <div className="stack">
+          <Card title="État de la connexion">
+            <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+              {sync.status === 'connecte' ? (
+                <Badge tone="good" icon="✔">
+                  Connecté au serveur partagé
+                </Badge>
+              ) : sync.status === 'connexion' ? (
+                <Badge tone="warning" icon="⟳">
+                  Connexion en cours
+                </Badge>
+              ) : sync.status === 'erreur' ? (
+                <Badge tone="critical" icon="⚠">
+                  Erreur de synchronisation
+                </Badge>
+              ) : (
+                <Badge icon="💾">Mode local — ce poste uniquement</Badge>
+              )}
+              {sync.status === 'connecte' ? <span className="small muted">Révision {sync.revision}</span> : null}
+            </div>
+            {sync.lastError ? <p className="small delta-down">{sync.lastError}</p> : null}
+            <div className="grid g2">
+              <Field label="Nom de ce poste" hint="Affiché aux autres utilisateurs connectés">
+                <input
+                  value={db.settings.station}
+                  onChange={(event) => update((draft) => void (draft.settings.station = event.target.value))}
+                />
+              </Field>
+              <Field label="Postes connectés">
+                <div className="row row-wrap" style={{ gap: 5, padding: '6px 0' }}>
+                  {sync.presence.length ? (
+                    sync.presence.map((poste) => (
+                      <span key={poste.id} className="chip">
+                        🖥️ {poste.nom}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="small dim">Aucun autre poste</span>
+                  )}
+                </div>
+              </Field>
+            </div>
+            <div className="row row-wrap" style={{ gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn" disabled={sync.status !== 'connecte'} onClick={() => void sync.refresh()}>
+                Recharger depuis le serveur
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={sync.status !== 'connecte'}
+                onClick={() => {
+                  if (!window.confirm('Remplacer la base du serveur par celle de ce poste ? Les autres postes seront resynchronisés.')) return;
+                  void sync.publishLocal();
+                }}
+              >
+                Publier la base de ce poste
+              </button>
+            </div>
+          </Card>
+
+          <Card title="Mettre l’application en réseau">
+            <ol className="small muted" style={{ paddingLeft: 18, lineHeight: 1.8, margin: 0 }}>
+              <li>
+                Sur le poste qui fait office de serveur : <span className="mono">npm run build</span> puis{' '}
+                <span className="mono">npm start</span>.
+              </li>
+              <li>
+                Le terminal affiche l’adresse réseau, par exemple <span className="mono">http://192.168.1.20:8080</span>.
+              </li>
+              <li>
+                Chaque autre ordinateur ouvre cette adresse dans son navigateur : la base est commune et les
+                modifications apparaissent en direct.
+              </li>
+              <li>Pour un accès depuis l’extérieur, publiez ce port derrière votre routeur ou un tunnel HTTPS.</li>
+            </ol>
+            <p className="small dim" style={{ marginTop: 10 }}>
+              Sans serveur joignable, l’application continue de fonctionner seule sur le poste, avec sa base locale.
             </p>
           </Card>
         </div>
@@ -364,6 +497,8 @@ export default function Parametres() {
           </Card>
         </div>
       ) : null}
+
+      {domain ? <CategoryManager domain={domain} onClose={() => setDomain(null)} /> : null}
 
       {confirmReset ? (
         <ConfirmDialog

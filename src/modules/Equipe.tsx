@@ -5,6 +5,7 @@ import { addDays, daysBetween, formatDate, money, money0, num, pct, sum, today, 
 import { Badge, Card, ConfirmDialog, DataTable, EmptyState, Field, Modal, PageHeader, Tabs, type Column } from '../ui/kit';
 import { BarList, StatTile } from '../ui/charts';
 import { EntityChip } from '../ui/shared';
+import { ManageCategoriesButton } from '../ui/CategoryManager';
 
 const STATUS_LABEL: Record<StaffStatus, string> = {
   salarie: 'Salarié',
@@ -151,6 +152,7 @@ export default function Equipe() {
             >
               + Affecter à un projet
             </button>
+            <ManageCategoriesButton domain="competence" label="Compétences" />
             <button type="button" className="btn btn-primary" onClick={() => setDraft(emptyStaff(defaultEntity))}>
               + Nouvelle personne
             </button>
@@ -374,6 +376,44 @@ export default function Equipe() {
   );
 }
 
+/** Selection des competences dans la taxonomie, avec gestion sur place. */
+function SkillPicker({ value, onChange }: { value: string[]; onChange: (skills: string[]) => void }) {
+  const { categories } = useStore();
+  const list = categories('competence');
+  const extra = value.filter((skill) => !list.some((entry) => entry.label === skill));
+  const toggle = (label: string) =>
+    onChange(value.includes(label) ? value.filter((entry) => entry !== label) : [...value, label]);
+
+  return (
+    <div className="stack-sm">
+      <div className="row row-wrap" style={{ gap: 5 }}>
+        {[...list.map((entry) => entry.label), ...extra].map((label) => (
+          <button
+            key={label}
+            type="button"
+            className="chip"
+            aria-pressed={value.includes(label)}
+            onClick={() => toggle(label)}
+            style={{
+              cursor: 'pointer',
+              background: value.includes(label) ? 'var(--accent-soft)' : 'var(--surface-2)',
+              borderColor: value.includes(label) ? 'var(--accent-line)' : 'var(--line-soft)',
+              color: value.includes(label) ? 'var(--ink)' : 'var(--ink-3)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="row">
+        <span className="small dim">{value.length} compétence(s) sélectionnée(s)</span>
+        <span className="spacer" />
+        <ManageCategoriesButton domain="competence" label="Gérer" />
+      </div>
+    </div>
+  );
+}
+
 function StaffForm({
   value,
   onChange,
@@ -449,11 +489,8 @@ function StaffForm({
           <Field label="Téléphone">
             <input value={value.phone} onChange={(event) => set('phone', event.target.value)} />
           </Field>
-          <Field label="Compétences" span={2} hint="Séparées par des virgules">
-            <input
-              value={value.skills.join(', ')}
-              onChange={(event) => set('skills', event.target.value.split(',').map((skill) => skill.trim()).filter(Boolean))}
-            />
+          <Field label="Compétences" span={2} hint="Cochez celles que la personne maîtrise">
+            <SkillPicker value={value.skills} onChange={(next) => set('skills', next)} />
           </Field>
         </div>
       </Modal>

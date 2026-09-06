@@ -7,6 +7,7 @@ import { downloadFile, formatDate, initials, money, money0, sum, toCSV, today, u
 import { Badge, Card, ConfirmDialog, DataTable, EmptyState, Field, Modal, PageHeader, Tabs, type Column } from '../ui/kit';
 import { StatTile } from '../ui/charts';
 import { ClientCell, DocStatusBadge, EntityChip, KeyValue, Stars } from '../ui/shared';
+import { ManageCategoriesButton } from '../ui/CategoryManager';
 
 const KIND_LABEL: Record<ClientKind, string> = {
   pro: 'Entreprise',
@@ -190,6 +191,7 @@ export default function Clients() {
             >
               Exporter CSV
             </button>
+            <ManageCategoriesButton domain="etiquette" label="Étiquettes" />
             <button type="button" className="btn btn-primary" onClick={() => setDraft(emptyClient(defaultEntity))}>
               + Nouveau client
             </button>
@@ -487,6 +489,37 @@ function ClientDetail({
 
 /* ------------------------------------------------------------ formulaire */
 
+/** Etiquettes issues de la taxonomie, avec ajout libre conserve. */
+function TagPicker({ value, onChange }: { value: string[]; onChange: (tags: string[]) => void }) {
+  const { categories } = useStore();
+  const list = categories('etiquette');
+  const extra = value.filter((tag) => !list.some((entry) => entry.label === tag));
+  const toggle = (label: string) =>
+    onChange(value.includes(label) ? value.filter((entry) => entry !== label) : [...value, label]);
+
+  return (
+    <div className="row row-wrap" style={{ gap: 5 }}>
+      {[...list.map((entry) => entry.label), ...extra].map((label) => (
+        <button
+          key={label}
+          type="button"
+          className="chip"
+          aria-pressed={value.includes(label)}
+          onClick={() => toggle(label)}
+          style={{
+            cursor: 'pointer',
+            background: value.includes(label) ? 'var(--accent-soft)' : 'var(--surface-2)',
+            borderColor: value.includes(label) ? 'var(--accent-line)' : 'var(--line-soft)',
+            color: value.includes(label) ? 'var(--ink)' : 'var(--ink-3)',
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ClientForm({
   value,
   onChange,
@@ -588,11 +621,8 @@ function ClientForm({
           <Field label="TVA intracommunautaire">
             <input value={value.vatNumber} onChange={(event) => set('vatNumber', event.target.value)} />
           </Field>
-          <Field label="Étiquettes" hint="Séparées par des virgules">
-            <input
-              value={value.tags.join(', ')}
-              onChange={(event) => set('tags', event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))}
-            />
+          <Field label="Étiquettes" hint="Gérées depuis la liste des clients">
+            <TagPicker value={value.tags} onChange={(next) => set('tags', next)} />
           </Field>
 
           <Field label="Délai de paiement (jours)">

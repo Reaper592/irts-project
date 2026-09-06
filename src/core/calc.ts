@@ -7,7 +7,8 @@ import type {
   Product,
   Scene,
 } from './types';
-import { rentalDays, round2, sum, today } from './utils';
+import { round2, sum, today } from './utils';
+import { billableUnits, itemSize, objectDef, productIdForRef } from '../modules/studio/library';
 
 /* ------------------------------------------------------- tarification parc */
 
@@ -348,34 +349,91 @@ export function clientBalance(client: Client, docs: BusinessDoc[], products: Pro
 
 /* ------------------------------------------------------------- scene 3D -> devis */
 
-/** Lignes de devis deduites d'une scene du Studio. */
-export function sceneToLines(scene: Scene, products: Product[]): DocLine[] {
-  const byId = new Map(products.map((p) => [p.id, p]));
-  const counts = new Map<string, number>();
+/**
+ * Ligne de devis deduite d'un objet de scene, avec sa description complete :
+ * marque, modele et cotes reelles. Un objet pose dans le Studio doit arriver
+ * dans le devis sans ressaisie et sans ambiguite pour le client.
+ */
+export interface SceneLine extends DocLine {
+  /** Objets de la scene regroupes sur cette ligne. */
+  itemIds: string[];
+  /** Cotes en metres, telles que posees. */
+  size: [number, number, number];
+}
+
+/** Objet pose dans la scene mais sans reference facturable (decor, echelle). */
+export interface SceneExtra {
+  itemId: string;
+  label: string;
+  size: [number, number, number];
+}
+
+function formatSize(size: [number, number, number]): string {
+  const fmt = (value: number) => value.toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+  return `L ${fmt(size[0])} × H ${fmt(size[1])} × P ${fmt(size[2])} m`;
+}
+
+/**
+ * Lignes de devis d'une scene. Les objets identiques posés aux mêmes cotes
+ * sont regroupés ; deux tailles différentes du même produit restent sur deux
+ * lignes, parce que le client paie et lit des quantités par gabarit.
+ */
+export function sceneLines(
+  scene: Scene,
+  products: Product[],
+): { lines: SceneLine[]; extras: SceneExtra[] } {
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const groups = new Map<string, SceneLine>();
+  const extras: SceneExtra[] = [];
+
   for (const item of scene.items) {
-    if (!item.productId) continue;
-    counts.set(item.productId, (counts.get(item.productId) ?? 0) + item.qty);
-  }
-  const days = rentalDays(today(), today());
-  const lines: DocLine[] = [];
-  let index = 0;
-  for (const [productId, qty] of counts) {
-    const product = byId.get(productId);
-    if (!product) continue;
-    index += 1;
-    lines.push({
-      id: `line_scene_${index}`,
-      productId,
+    const def = objectDef(item.model3d);
+    const size = itemSize(item.model3d, item);
+    const product = item.productId
+      ? byId.get(item.productId) ?? null
+      : def.product
+        ? byId.get(productIdForRef(def.product.ref)) ?? null
+        : null;
+
+    if (!product) {
+      extras.push({ itemId: item.id, label: item.label || def.label, size });
+      continue;
+    }
+
+    const units = billableUnits(item.model3d, size, item.qty);
+    const key = `${product.id}|${size.map((value) => value.toFixed(2)).join('x')}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.qty += units;
+      existing.itemIds.push(item.id);
+      continue;
+    }
+    groups.set(key, {
+      id: `line_${key.replace(/[^a-z0-9]+/gi, '_')}`,
+      productId: product.id,
       designation: product.name,
-      description: `${product.brand} ${product.model}`.trim(),
-      qty,
-      days,
+      description: [`${product.brand} ${product.model}`.trim(), formatSize(size)].filter(Boolean).join(' — '),
+      qty: units,
+      days: 1,
       unitPrice: product.mode === 'vente' ? product.priceSale : product.priceDay,
       discountPct: 0,
       vatRate: product.vatRate,
       degressive: product.mode === 'location',
       kind: product.mode,
+      itemIds: [item.id],
+      size,
     });
   }
-  return lines;
+
+  const lines = [...groups.values()].sort((a, b) => a.designation.localeCompare(b.designation));
+  return { lines, extras };
+}
+
+/** Lignes de devis prêtes à insérer dans un document. */
+export function sceneToLines(scene: Scene, products: Product[]): DocLine[] {
+  return sceneLines(scene, products).lines.map(({ itemIds, size, ...line }) => {
+    void itemIds;
+    void size;
+    return line;
+  });
 }
