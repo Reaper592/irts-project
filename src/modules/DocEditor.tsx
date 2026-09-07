@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../core/store';
+import { useNav } from '../core/nav';
 import { availability, docTotals, lineTotals, reservationsFrom, sceneToLines } from '../core/calc';
 import { openPrintable, renderDocumentHTML } from '../core/documents';
 import type { BusinessDoc, DocLine, Payment, Product } from '../core/types';
@@ -12,6 +13,7 @@ const KIND_LABEL = { devis: 'Devis', facture: 'Facture', avoir: 'Avoir' } as con
 export function DocEditor({ docId, onClose }: { docId: string; onClose: () => void }) {
   const store = useStore();
   const { db, update, companyOf, toast, nextNumber } = store;
+  const { go } = useNav();
   const doc = db.docs.find((entry) => entry.id === docId);
   const [showPayment, setShowPayment] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -131,7 +133,10 @@ export function DocEditor({ docId, onClose }: { docId: string; onClose: () => vo
       });
     });
     toast(`Facture ${number} créée depuis le devis ${doc.number}.`, 'succes');
+    // On atterrit sur la facture creee, pas sur la liste des devis : c'est
+    // elle qu'il reste a envoyer, dater et encaisser.
     onClose();
+    go('factures', id);
   };
 
   const createCredit = () => {
