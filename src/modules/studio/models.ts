@@ -34,6 +34,10 @@ function cached(key: string, build: () => THREE.BufferGeometry): THREE.BufferGeo
   let geometry = CACHE.get(key);
   if (!geometry) {
     geometry = build();
+    // Marquee comme partagee : la scene est rebatie a chaque deplacement, et
+    // le nettoyage qui suit ne doit liberer que les mailles fabriquees pour
+    // cette construction-la, jamais celles du cache.
+    geometry.userData.shared = true;
     CACHE.set(key, geometry);
   }
   return geometry;
@@ -227,6 +231,7 @@ function crownGeometry(w: number, h: number, d: number, seed: number): THREE.Buf
 
 let FOLIAGE: THREE.MeshStandardMaterial | null = null;
 
+
 /** Materiau de couronne : couleur portee par les sommets, facettes marquees. */
 function foliageMaterial(): THREE.MeshStandardMaterial {
   if (!FOLIAGE) {
@@ -236,6 +241,7 @@ function foliageMaterial(): THREE.MeshStandardMaterial {
       metalness: 0,
       flatShading: true,
     });
+    FOLIAGE.userData.shared = true;
   }
   return FOLIAGE;
 }

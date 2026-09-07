@@ -175,6 +175,14 @@ irradiance d'intérieur débouche les ombres au point de les faire disparaître 
 extérieur. Le brouillard prend la couleur de l'horizon, ce qui fond le sol
 lointain dans la voûte au lieu de l'arrêter sur une arête.
 
+Le Studio tient la charge : environ 330 ms pour bâtir une scène de 1 200
+objets, et la mémoire vidéo reste stable au fil des manipulations. C'est une
+propriété qui se vérifie, pas qui se suppose : three.js ne libère rien tout
+seul, et la scène est reconstruite à chaque déplacement d'objet. Le moteur
+libère donc les mailles et les textures fabriquées pour la construction
+précédente — celles du cache portent la marque `shared` et survivent — et ne
+rebâtit la chaîne de rendu qu'au changement réel de qualité.
+
 Le moteur expose deux relevés pour le support et les tests de non-régression :
 `window.irtsStudio.diagnostics()` donne l'état des ombres, des passes de rendu
 et de l'éclairage ; `window.irtsStudio.contactReport()` donne, pour chaque

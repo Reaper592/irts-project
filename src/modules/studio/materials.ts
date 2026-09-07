@@ -27,6 +27,7 @@ function canvasTexture(key: string, size: number, paint: Painter, repeat: [numbe
   texture.repeat.set(repeat[0], repeat[1]);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
+  texture.userData.shared = true;
   CACHE.set(key, texture);
   return texture;
 }
@@ -87,6 +88,7 @@ function roughnessFrom(key: string, source: HTMLCanvasElement, base: number, spr
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.anisotropy = 8;
+  texture.userData.shared = true;
   ROUGHNESS.set(key, texture);
   return texture;
 }
@@ -348,6 +350,10 @@ export function groundMaterial(
   // Chaque plan a sa propre cadence : on clone plutot que de modifier la
   // texture partagee du cache, sinon le dernier appelant impose la sienne.
   const texture = base.clone();
+  // `Texture.clone()` recopie aussi `userData` : sans cette remise a zero, le
+  // clone herite de la marque « partagee » de sa source et echappe au
+  // nettoyage, alors qu'il est fabrique pour cette construction seulement.
+  texture.userData = {};
   texture.repeat.set(tiles, tiles);
   // Repetition en miroir : les motifs peints dans le canvas sont coupes net a
   // ses bords, et une repetition simple aligne ces coupures en une grille
@@ -359,6 +365,7 @@ export function groundMaterial(
   texture.needsUpdate = true;
 
   const roughness = roughnessFrom(`${key}_r`, source, config.roughness, 0.35).clone();
+  roughness.userData = {};
   roughness.repeat.set(tiles, tiles);
   roughness.wrapS = THREE.MirroredRepeatWrapping;
   roughness.wrapT = THREE.MirroredRepeatWrapping;
@@ -471,6 +478,11 @@ export interface StudioMaterials {
   inox: THREE.MeshStandardMaterial;
 }
 
+/**
+ * Materiaux durables du Studio : construits une fois pour la duree de vie du
+ * moteur, ils sont marques partages pour survivre au nettoyage qui suit
+ * chaque reconstruction de scene.
+ */
 export function createMaterials(): StudioMaterials {
   const grille = canvasTexture(
     'grille',
@@ -527,7 +539,7 @@ export function createMaterials(): StudioMaterials {
     [3, 3],
   );
 
-  return {
+  const materials: StudioMaterials = {
     caisson: new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.62, metalness: 0.12 }),
     grille: new THREE.MeshStandardMaterial({
       color: 0x0c0e12,
@@ -574,6 +586,8 @@ export function createMaterials(): StudioMaterials {
     corten: new THREE.MeshStandardMaterial({ color: 0x2f5d7a, roughness: 0.74, metalness: 0.32 }),
     inox: new THREE.MeshStandardMaterial({ color: 0xd6dade, roughness: 0.22, metalness: 0.95 }),
   };
+  for (const material of Object.values(materials)) material.userData.shared = true;
+  return materials;
 }
 
 /** Contenu anime d'un mur LED ou d'un ecran. */

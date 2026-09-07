@@ -296,6 +296,7 @@ export class StudioEngine {
   private bloom!: UnrealBloomPass;
   private gtao: GTAOPass | null = null;
   private grade!: ShaderPass;
+  private quality: SceneModel['quality'] | null = null;
   private materials: StudioMaterials = createMaterials();
 
   private content = new THREE.Group();
@@ -486,6 +487,13 @@ export class StudioEngine {
   private buildComposer(quality: SceneModel['quality']) {
     const width = Math.max(1, this.host.clientWidth);
     const height = Math.max(1, this.host.clientHeight);
+    // Les cibles de rendu de la chaine precedente sont rendues avant d'en
+    // allouer de nouvelles : three.js ne libere rien tout seul.
+    if (this.composer) {
+      for (const pass of this.composer.passes) pass.dispose?.();
+      this.composer.dispose();
+    }
+    this.quality = quality;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.activeCamera()));
 
@@ -494,19 +502,9 @@ export class StudioEngine {
     if (quality !== 'rapide') {
       const gtao = new GTAOPass(this.scene, this.camera, width, height);
       gtao.output = GTAOPass.OUTPUT.Default;
-      // Le rayon s'exprime en metres : cale sur la taille du site, sinon
-      // l'occlusion est invisible sur un terrain et trop dure dans une salle.
-      const site = this.model ? Math.max(this.model.width, this.model.depth) : 30;
-      const radius = THREE.MathUtils.clamp(site * 0.035, 0.5, 2.2);
-      gtao.updateGtaoMaterial({
-        radius: quality === 'photo' ? radius * 1.3 : radius,
-        distanceExponent: 1.2,
-        thickness: 1.4,
-        scale: quality === 'photo' ? 1.5 : 1.2,
-        samples: quality === 'photo' ? 16 : 10,
-      });
       this.composer.addPass(gtao);
       this.gtao = gtao;
+      this.tuneAmbientOcclusion();
     } else {
       this.gtao = null;
     }
@@ -545,6 +543,28 @@ export class StudioEngine {
     const pass = this.composer.passes[0] as RenderPass;
     if (pass) pass.camera = camera;
     if (this.gtao) this.gtao.camera = camera as THREE.PerspectiveCamera;
+  }
+
+  /**
+   * Rayon de l'occlusion ambiante, exprime en metres.
+   *
+   * Cale sur la taille du site : trop court, l'occlusion est invisible sur un
+   * terrain ; trop long, elle devient dure dans une salle. Le reglage suit
+   * donc les cotes du terrain, qui changent sans que la chaine de rendu soit
+   * rebatie.
+   */
+  private tuneAmbientOcclusion() {
+    if (!this.gtao) return;
+    const photo = this.quality === 'photo';
+    const site = this.model ? Math.max(this.model.width, this.model.depth) : 30;
+    const radius = THREE.MathUtils.clamp(site * 0.035, 0.5, 2.2);
+    this.gtao.updateGtaoMaterial({
+      radius: photo ? radius * 1.3 : radius,
+      distanceExponent: 1.2,
+      thickness: 1.4,
+      scale: photo ? 1.5 : 1.2,
+      samples: photo ? 16 : 10,
+    });
   }
 
   private loop = () => {
@@ -1054,6 +1074,7 @@ export class StudioEngine {
 
   /** Redessine les poignees du contour en cours d'edition. */
   private refreshHandles() {
+    for (const child of this.surfaceHandles.children) this.disposeSubtree(child);
     this.surfaceHandles.clear();
     const model = this.model;
     if (!model || !this.surfaceTarget) return;
@@ -1275,6 +1296,13 @@ export class StudioEngine {
   }
 
   setQuality(quality: SceneModel['quality']) {
+    // La chaine de rendu ne se rebatit qu'au changement reel de qualite. Elle
+    // etait refaite a chaque construction de scene, donc a chaque deplacement
+    // d'objet, en abandonnant a chaque fois ses cibles de rendu et les
+    // textures de l'antialiasing : une vingtaine de textures perdues par
+    // manipulation.
+    if (this.quality === quality && this.composer) return;
+    this.quality = quality;
     this.buildComposer(quality);
     this.resize();
   }
@@ -1291,12 +1319,16 @@ export class StudioEngine {
     this.outlineOff();
     this.gizmo.detach();
     this.gizmo.getHelper().visible = false;
+
+    for (const child of this.content.children) this.disposeSubtree(child);
+    for (const child of this.helpers.children) this.disposeSubtree(child);
     this.content.clear();
     this.helpers.clear();
 
     for (const child of this.scene.children.filter(
       (child) => child.userData.decor === true,
     )) {
+      this.disposeSubtree(child);
       this.scene.remove(child);
     }
 
@@ -1310,6 +1342,7 @@ export class StudioEngine {
 
     this.refreshHandles();
     this.drawMeasure();
+    this.tuneAmbientOcclusion();
     if (this.selection.length) this.selectMany(this.selection);
     this.applySettings(model);
     this.setQuality(model.quality);
@@ -1466,8 +1499,37 @@ export class StudioEngine {
     this.helpers.add(outline);
   }
 
+  /**
+   * Libere les ressources GPU d'un sous-arbre retire de la scene.
+   *
+   * three.js ne libere rien tout seul : une maille retiree de la scene garde
+   * son tampon en memoire video. Or la scene est rebatie a chaque deplacement
+   * d'objet — une heure d'implantation faisait donc gonfler la memoire sans
+   * fin. Seules les ressources fabriquees pour cette construction sont
+   * liberees : le cache de geometries et les materiaux durables du Studio
+   * portent la marque `shared` et sont laisses intacts.
+   */
+  private disposeSubtree(root: THREE.Object3D) {
+    root.traverse((node) => {
+      const mesh = node as THREE.Mesh & { material?: THREE.Material | THREE.Material[] };
+      const geometry = mesh.geometry as THREE.BufferGeometry | undefined;
+      if (geometry && !geometry.userData?.shared) geometry.dispose();
+      const material = mesh.material;
+      if (!material) return;
+      for (const entry of Array.isArray(material) ? material : [material]) {
+        if (!entry || entry.userData?.shared) continue;
+        for (const value of Object.values(entry as unknown as Record<string, unknown>)) {
+          const texture = value as THREE.Texture | null;
+          if (texture && (texture as THREE.Texture).isTexture && !texture.userData?.shared) texture.dispose();
+        }
+        entry.dispose();
+      }
+    });
+  }
+
   /** Cotes du terrain, facon plan technique. */
   private buildDimensions(model: SceneModel) {
+    for (const child of this.dimensions.children) this.disposeSubtree(child);
     this.dimensions.clear();
     const line = new THREE.LineBasicMaterial({ color: 0x9fb4cc });
     const half = { w: model.width / 2, d: model.depth / 2 };
