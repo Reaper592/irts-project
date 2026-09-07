@@ -18,11 +18,13 @@ export function renderDocumentHTML(
   company: Company,
   client: Client | undefined,
   products: Product[],
+  /** Les autres documents, pour retrouver celui dont celui-ci decoule. */
+  docs: BusinessDoc[] = [],
 ): string {
   const totals = docTotals(doc, products);
   const byId = new Map(products.map((product) => [product.id, product]));
   const isQuote = doc.kind === 'devis';
-  const rental = doc.lines.some((line) => line.kind === 'location');
+  const source = doc.sourceDocId ? docs.find((entry) => entry.id === doc.sourceDocId) ?? null : null;
   const days = doc.eventStart && doc.eventEnd ? rentalDays(doc.eventStart, doc.eventEnd) : 0;
 
   const rows = doc.lines
@@ -156,11 +158,29 @@ export function renderDocumentHTML(
   </div>
 
   ${
-    doc.title || doc.venue || rental
+    doc.title || doc.venue || doc.eventStart || source
       ? `<div class="context">
           ${doc.title ? `<div><span>Objet</span>${esc(doc.title)}</div>` : ''}
+          ${
+            /* Un avoir doit porter la reference de la facture qu'il rectifie ;
+               une facture issue d'un devis gagne a rappeler son origine. */
+            source
+              ? `<div><span>${doc.kind === 'avoir' ? 'Rectifie la facture' : 'Référence'}</span>${esc(source.number)} du ${formatDate(source.date)}</div>`
+              : ''
+          }
           ${doc.venue ? `<div><span>Lieu</span>${esc(doc.venue)}</div>` : ''}
-          ${rental && days ? `<div><span>Période</span>${formatDate(doc.eventStart)} → ${formatDate(doc.eventEnd)} (${days} j)</div>` : ''}
+          ${
+            /* La date de la vente ou de la prestation est une mention
+               obligatoire de la facture (art. L441-9 du code de commerce) :
+               elle s'imprime des qu'elle est connue, location ou non. */
+            doc.eventStart
+              ? `<div><span>${isQuote ? 'Période' : 'Date de la prestation'}</span>${formatDate(doc.eventStart)}${
+                  doc.eventEnd && doc.eventEnd !== doc.eventStart
+                    ? ` → ${formatDate(doc.eventEnd)}${days ? ` (${days} j)` : ''}`
+                    : ''
+                }</div>`
+              : ''
+          }
         </div>`
       : ''
   }

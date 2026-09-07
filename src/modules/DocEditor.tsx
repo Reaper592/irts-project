@@ -141,12 +141,13 @@ export function DocEditor({ docId, onClose }: { docId: string; onClose: () => vo
 
   const createCredit = () => {
     const number = nextNumber(doc.entity, 'avoir');
+    const id = uid('doc');
     update((draft) => {
       const source = draft.docs.find((entry) => entry.id === docId);
       if (!source) return;
       draft.docs.unshift({
         ...structuredClone(source),
-        id: uid('doc'),
+        id,
         kind: 'avoir',
         number,
         sourceDocId: source.id,
@@ -160,6 +161,7 @@ export function DocEditor({ docId, onClose }: { docId: string; onClose: () => vo
     });
     toast(`Avoir ${number} généré.`, 'succes');
     onClose();
+    go('factures', id);
   };
 
   const duplicate = () => {
@@ -202,7 +204,7 @@ export function DocEditor({ docId, onClose }: { docId: string; onClose: () => vo
   };
 
   const print = () => {
-    const html = renderDocumentHTML(doc, company, client, products);
+    const html = renderDocumentHTML(doc, company, client, products, db.docs);
     if (!openPrintable(html)) toast('Le navigateur a bloqué la fenêtre d’impression.', 'alerte');
   };
 
