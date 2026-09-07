@@ -2389,6 +2389,7 @@ export const SCENES: Scene[] = [
     showGrid: true,
     quality: 'equilibre',
     sunAzimuth: 250,
+    hiddenFamilies: [],
     notes:
       'Guinguette clé en main : tente stretch 10 x 15, bar 4 modules avec tireuse 2 becs, plancha et four à pizza, 150 couverts en tables brasserie, guirlandes guinguette, sanitaires et groupe électrogène.',
     createdAt: addDays(NOW, -8),
@@ -2484,6 +2485,7 @@ export const SCENES: Scene[] = [
     showGrid: true,
     quality: 'equilibre',
     sunAzimuth: 135,
+    hiddenFamilies: [],
     notes: 'Ouverture de scène 14 m, hauteur sous grill 9 m. Line array 6 boîtes par côté.',
     createdAt: addDays(NOW, -12),
     items: [
@@ -2529,6 +2531,7 @@ export const SCENES: Scene[] = [
     showGrid: true,
     quality: 'equilibre',
     sunAzimuth: 135,
+    hiddenFamilies: [],
     notes: 'Plénière assise 700 personnes, mur LED 6 x 3 m, pupitre côté jardin.',
     createdAt: addDays(NOW, -4),
     items: [
@@ -2568,6 +2571,7 @@ export const SCENES: Scene[] = [
     showGrid: true,
     quality: 'equilibre',
     sunAzimuth: 135,
+    hiddenFamilies: [],
     notes: 'Cérémonie 16 h en extérieur, dîner et soirée dansante sous orangerie.',
     createdAt: addDays(NOW, -26),
     items: [

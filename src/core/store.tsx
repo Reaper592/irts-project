@@ -82,6 +82,7 @@ export function migrate(db: Partial<Database>): Database {
     // Le sol etait une couleur ; il designe maintenant une nature de surface.
     floorTone: scene.floorTone?.startsWith('#') ? 'beton' : scene.floorTone ?? 'beton',
     sunAzimuth: scene.sunAzimuth ?? 135,
+    hiddenFamilies: scene.hiddenFamilies ?? [],
     items: (scene.items ?? []).map((item) => ({
       ...item,
       categoryId: item.categoryId ?? null,

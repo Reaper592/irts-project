@@ -505,6 +505,8 @@ export interface Scene {
   quality: 'rapide' | 'equilibre' | 'photo';
   /** Azimut du soleil en degres, pour l'ombre portee en exterieur. */
   sunAzimuth: number;
+  /** Familles d'objets masquees a l'affichage — le chiffrage les garde. */
+  hiddenFamilies: string[];
   items: SceneItem[];
   notes: string;
   createdAt: string;

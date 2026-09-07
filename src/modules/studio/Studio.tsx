@@ -107,6 +107,7 @@ function emptyScene(entity: EntityId): Scene {
     showGrid: true,
     quality: 'equilibre',
     sunAzimuth: 135,
+    hiddenFamilies: [],
     items: [],
     notes: '',
     createdAt: today(),
@@ -119,7 +120,11 @@ export default function Studio() {
   const { focus, go } = useNav();
   const scenes = useMemo(() => visible(db.scenes), [db.scenes, visible]);
   const [sceneId, setSceneId] = useState<string | null>(focus ?? scenes[0]?.id ?? null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<string[]>([]);
+  const [measure, setMeasure] = useState<{ active: boolean; points: GroundPoint[] }>({ active: false, points: [] });
+  const [arraying, setArraying] = useState(false);
+  const selected = selection.length === 1 ? selection[0] : null;
+  const setSelected = useCallback((id: string | null) => setSelection(id ? [id] : []), []);
   const [adding, setAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [ready, setReady] = useState(false);
@@ -170,6 +175,23 @@ export default function Studio() {
     [pushHistory, update],
   );
 
+  /** Applique en une seule fois les changements issus d'une manipulation. */
+  const patchItems = useCallback(
+    (changes: { id: string; change: Partial<SceneItem> }[], snapshot = true) => {
+      if (!changes.length) return;
+      if (snapshot) pushHistory();
+      update((draft) => {
+        const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+        if (!target) return;
+        for (const { id, change } of changes) {
+          const item = target.items.find((entry) => entry.id === id);
+          if (item) Object.assign(item, change);
+        }
+      });
+    },
+    [pushHistory, update],
+  );
+
   const undo = useCallback(() => {
     setHistory((state) => {
       const previous = state.past[state.past.length - 1];
@@ -204,9 +226,22 @@ export default function Studio() {
     const engine = new StudioEngine(host);
     engineRef.current = engine;
     engine.handlers = {
-      onSelect: (itemId) => setSelected(itemId),
-      onTransform: (itemId, change) => patchItem(itemId, change),
+      onSelect: (itemId, additive) => {
+        if (!itemId) {
+          if (!additive) setSelection([]);
+          return;
+        }
+        setSelection((current) =>
+          additive
+            ? current.includes(itemId)
+              ? current.filter((entry) => entry !== itemId)
+              : [...current, itemId]
+            : [itemId],
+        );
+      },
+      onTransform: (changes) => patchItems(changes),
       onHover: () => {},
+      onMeasure: (points) => setMeasure((state) => ({ ...state, points })),
       onSurfaceChange: (target, points) => {
         if (target.kind === 'site') {
           patch({ groundShape: 'polygone', polygon: points }, false);
@@ -228,7 +263,7 @@ export default function Studio() {
       engineRef.current = null;
       setReady(false);
     };
-  }, [patchItem, patch, update]);
+  }, [patchItem, patchItems, patch, update]);
 
   /** Cle de reconstruction : tout ce qui change la geometrie de la scene. */
   const sceneKey = scene
@@ -245,6 +280,7 @@ export default function Studio() {
         scene.sunAzimuth,
         scene.quality,
         scene.groundShape,
+        scene.hiddenFamilies.join('+'),
         scene.polygon.map((point) => `${point.x},${point.z}`).join(';'),
         scene.zones
           .map((zone) => `${zone.id}:${zone.ground}:${zone.elevation}:${zone.visible}:${zone.polygon.map((p) => `${p.x},${p.z}`).join('|')}`)
@@ -266,8 +302,12 @@ export default function Studio() {
   }, [ready, scene?.exposure, scene?.bloom, scene?.haze, scene?.ambient, scene?.showGrid, scene?.gridSnap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    engineRef.current?.selectById(selected);
-  }, [selected, sceneKey]);
+    engineRef.current?.selectMany(selection);
+  }, [selection, sceneKey]);
+
+  useEffect(() => {
+    engineRef.current?.setMeasureMode(measure.active);
+  }, [measure.active]);
 
   useEffect(() => {
     engineRef.current?.setTransformMode(mode);
@@ -303,9 +343,15 @@ export default function Studio() {
         else undo();
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && key === 'a') {
+        event.preventDefault();
+        setSelection(engineRef.current?.allItemIds() ?? []);
+        return;
+      }
       if (key === 'd') setMode('translate');
       if (key === 'r') setMode('rotate');
       if (key === 't') setMode('scale');
+      if (key === 'm') setMeasure((state) => ({ active: !state.active, points: [] }));
       if (key === 'g') patch({ showGrid: !sceneRef.current?.showGrid }, false);
       if (key === 'p') {
         const next = !engineRef.current?.isPlanMode();
@@ -313,23 +359,31 @@ export default function Studio() {
         setPlanMode(next);
       }
       if ((key === 'delete' || key === 'backspace') && engineRef.current?.removeHoveredVertex()) return;
+      if ((key === 'delete' || key === 'backspace') && measure.active) {
+        engineRef.current?.undoMeasurePoint();
+        return;
+      }
+      if (key === 'escape' && measure.active) {
+        setMeasure({ active: false, points: [] });
+        return;
+      }
       if (key === 'escape' && surfaceTarget) {
         setSurfaceTarget(null);
         return;
       }
-      if ((key === 'delete' || key === 'backspace') && selected) {
+      if ((key === 'delete' || key === 'backspace') && selection.length) {
         pushHistory();
         update((draft) => {
           const target2 = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
-          if (target2) target2.items = target2.items.filter((entry) => entry.id !== selected);
+          if (target2) target2.items = target2.items.filter((entry) => !selection.includes(entry.id));
         });
-        setSelected(null);
+        setSelection([]);
       }
-      if (key === 'escape') setSelected(null);
+      if (key === 'escape') setSelection([]);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected, surfaceTarget, undo, redo, patch, pushHistory, update]);
+  }, [selection, surfaceTarget, measure.active, undo, redo, patch, pushHistory, update]);
 
   /* ----------------------------------------------------------- chiffrage */
 
@@ -565,6 +619,101 @@ export default function Studio() {
   };
 
   const siteEditing = surfaceTarget?.kind === 'site';
+  /* ------------------------------------------------------- duplication */
+
+  /** Emprise de la selection, en metres, pour proposer un pas de reseau juste. */
+  const selectionSpan = useMemo(() => {
+    const items = (scene?.items ?? []).filter((item) => selection.includes(item.id));
+    if (!items.length) return { x: 1, z: 1 };
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const item of items) {
+      const size = itemSize(item.model3d, item);
+      minX = Math.min(minX, item.x - size[0] / 2);
+      maxX = Math.max(maxX, item.x + size[0] / 2);
+      minZ = Math.min(minZ, item.z - size[2] / 2);
+      maxZ = Math.max(maxZ, item.z + size[2] / 2);
+    }
+    return { x: Math.max(0.2, Math.round((maxX - minX) * 100) / 100), z: Math.max(0.2, Math.round((maxZ - minZ) * 100) / 100) };
+  }, [scene?.items, selection]);
+
+  /** Copie la selection avec un decalage, et selectionne les copies. */
+  const duplicateSelection = useCallback(
+    (offsetX = selectionSpan.x + 0.3, offsetZ = 0) => {
+      const source = (sceneRef.current?.items ?? []).filter((item) => selection.includes(item.id));
+      if (!source.length) return;
+      pushHistory();
+      const copies = source.map((item) => ({
+        ...structuredClone(item),
+        id: uid('si'),
+        x: Math.round((item.x + offsetX) * 100) / 100,
+        z: Math.round((item.z + offsetZ) * 100) / 100,
+      }));
+      update((draft) => {
+        const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+        if (target) target.items.push(...copies);
+      });
+      setSelection(copies.map((item) => item.id));
+    },
+    [selection, selectionSpan, pushHistory, update],
+  );
+
+  /**
+   * Repetition en reseau : la selection est recopiee sur une grille de
+   * `countX` par `countZ`, au pas donne. C'est ainsi qu'on pose trente tables
+   * ou une rangee de barrieres sans les placer une a une.
+   */
+  const arraySelection = useCallback(
+    (countX: number, stepX: number, countZ: number, stepZ: number) => {
+      const source = (sceneRef.current?.items ?? []).filter((item) => selection.includes(item.id));
+      if (!source.length || countX * countZ <= 1) return 0;
+      pushHistory();
+      const copies: SceneItem[] = [];
+      for (let ix = 0; ix < countX; ix += 1) {
+        for (let iz = 0; iz < countZ; iz += 1) {
+          if (!ix && !iz) continue;
+          for (const item of source) {
+            copies.push({
+              ...structuredClone(item),
+              id: uid('si'),
+              x: Math.round((item.x + ix * stepX) * 100) / 100,
+              z: Math.round((item.z + iz * stepZ) * 100) / 100,
+            });
+          }
+        }
+      }
+      update((draft) => {
+        const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+        if (target) target.items.push(...copies);
+      });
+      return copies.length;
+    },
+    [selection, pushHistory, update],
+  );
+
+  /** Longueur cumulee de la chaine de mesure en cours. */
+  const measureTotal = useMemo(() => {
+    let total = 0;
+    for (let index = 1; index < measure.points.length; index += 1) {
+      const a = measure.points[index - 1];
+      const b = measure.points[index];
+      total += Math.hypot(b.x - a.x, b.z - a.z);
+    }
+    return total;
+  }, [measure.points]);
+
+  /** Familles presentes dans la scene, avec leur effectif. */
+  const families = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of scene?.items ?? []) {
+      const family = objectDef(item.model3d).family;
+      counts.set(family, (counts.get(family) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
+  }, [scene?.items]);
+
   const selectedItem = scene?.items.find((item) => item.id === selected) ?? null;
   const selectedDef = selectedItem ? objectDef(selectedItem.model3d) : null;
   const selectedSize = selectedItem ? itemSize(selectedItem.model3d, selectedItem) : null;
@@ -647,6 +796,16 @@ export default function Studio() {
               >
                 {planMode ? '⬛ Vue en plan' : '⬜ Vue en plan'}
               </button>
+              <button
+                type="button"
+                className="btn"
+                aria-pressed={measure.active}
+                title="Mesurer une distance au sol — clic par clic (M)"
+                style={measure.active ? { background: '#c9902a', color: '#fff', borderColor: 'transparent' } : undefined}
+                onClick={() => setMeasure((state) => ({ active: !state.active, points: [] }))}
+              >
+                📏 Décamètre
+              </button>
               <div className="row" style={{ gap: 4 }}>
                 <span className="small muted nowrap">Accrochage</span>
                 <select
@@ -688,6 +847,16 @@ export default function Studio() {
                 {selectedItem && selectedSize ? (
                   <span style={{ color: 'var(--accent)' }}>
                     {selectedItem.label} — {num(selectedSize[0], 2)} × {num(selectedSize[1], 2)} × {num(selectedSize[2], 2)} m
+                  </span>
+                ) : null}
+                {selection.length > 1 ? (
+                  <span style={{ color: 'var(--accent)' }}>{selection.length} objets sélectionnés</span>
+                ) : null}
+                {measure.active ? (
+                  <span style={{ color: '#ffc857' }}>
+                    {measureTotal > 0
+                      ? `Décamètre : ${num(measureTotal, 2)} m sur ${measure.points.length - 1} segment(s)`
+                      : 'Décamètre : cliquez le premier point'}
                   </span>
                 ) : null}
               </div>
@@ -733,10 +902,11 @@ export default function Studio() {
             </div>
 
             <div className="small muted">
-              Clic : sélectionner · Glisser : orbiter · Molette : zoomer · Clic droit : déplacer la vue ·
-              <strong> D</strong> déplacer · <strong>R</strong> tourner · <strong>T</strong> dimensionner ·
-              <strong> P</strong> plan · <strong>G</strong> grille · <strong>Suppr</strong> supprimer ·
-              <strong> Ctrl+Z</strong> annuler
+              Clic : sélectionner · <strong>Maj+clic</strong> : ajouter à la sélection · Glisser : orbiter ·
+              Molette : zoomer · Clic droit : déplacer la vue · <strong>D</strong> déplacer ·
+              <strong> R</strong> tourner · <strong>T</strong> dimensionner · <strong>M</strong> décamètre ·
+              <strong> P</strong> plan · <strong>G</strong> grille · <strong>Ctrl+A</strong> tout sélectionner ·
+              <strong> Suppr</strong> supprimer · <strong>Ctrl+Z</strong> annuler
             </div>
           </div>
 
@@ -1238,6 +1408,102 @@ export default function Studio() {
                   </Card>
                 ) : null}
 
+                {selection.length > 1 ? (
+                  <Card title={`${selection.length} objets sélectionnés`} subtitle="Le gizmo agit sur l’ensemble">
+                    <div className="stack-sm">
+                      <div className="small dim">
+                        Déplacement et échelle s’appliquent à tout le groupe ; la rotation se fait autour de la
+                        verticale, au centre de la sélection.
+                      </div>
+                      <div className="row row-wrap" style={{ gap: 6 }}>
+                        <button type="button" className="btn btn-sm" onClick={() => setArraying(true)}>
+                          ⊞ Répéter en réseau
+                        </button>
+                        <button type="button" className="btn btn-sm" onClick={() => duplicateSelection()}>
+                          Dupliquer
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            const lock = !scene.items.filter((item) => selection.includes(item.id)).every((item) => item.locked);
+                            patchItems(selection.map((id) => ({ id, change: { locked: lock } })));
+                          }}
+                        >
+                          🔒 Verrouiller / libérer
+                        </button>
+                        <button type="button" className="btn btn-sm" onClick={() => setSelection([])}>
+                          Désélectionner
+                        </button>
+                        <span className="spacer" />
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          onClick={() => {
+                            pushHistory();
+                            update((draft) => {
+                              const target = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+                              if (target) target.items = target.items.filter((item) => !selection.includes(item.id));
+                            });
+                            setSelection([]);
+                          }}
+                        >
+                          Supprimer ({selection.length})
+                        </button>
+                      </div>
+                    </div>
+                  </Card>
+                ) : null}
+
+                {families.length ? (
+                  <Card title="Calques" subtitle="Masquer une famille sans la sortir du devis">
+                    <div className="stack-sm">
+                      {families.map(([family, count]) => {
+                        const hidden = scene.hiddenFamilies.includes(family);
+                        return (
+                          <div key={family} className="row" style={{ gap: 8 }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              title={hidden ? 'Afficher' : 'Masquer'}
+                              onClick={() =>
+                                patch({
+                                  hiddenFamilies: hidden
+                                    ? scene.hiddenFamilies.filter((entry) => entry !== family)
+                                    : [...scene.hiddenFamilies, family],
+                                })
+                              }
+                            >
+                              {hidden ? '🚫' : '👁'}
+                            </button>
+                            <span className="truncate" style={{ flex: 1, fontSize: 12.5, opacity: hidden ? 0.5 : 1 }}>
+                              {family}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              title="Sélectionner toute la famille"
+                              onClick={() =>
+                                setSelection(
+                                  scene.items.filter((item) => objectDef(item.model3d).family === family).map((item) => item.id),
+                                )
+                              }
+                            >
+                              ⊹
+                            </button>
+                            <span className="small dim tnum">{count}</span>
+                          </div>
+                        );
+                      })}
+                      {scene.hiddenFamilies.length ? (
+                        <button type="button" className="btn btn-sm" onClick={() => patch({ hiddenFamilies: [] })}>
+                          Tout réafficher
+                        </button>
+                      ) : null}
+                    </div>
+                  </Card>
+                ) : null}
+
                 <Card title="Objets de la scène" subtitle={`${scene.items.length} élément(s)`} flush>
                   <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                     {scene.items.map((item) => {
@@ -1251,7 +1517,7 @@ export default function Studio() {
                             width: '100%',
                             gap: 8,
                             padding: '7px 14px',
-                            background: selected === item.id ? 'var(--surface-3)' : 'transparent',
+                            background: selection.includes(item.id) ? 'var(--surface-3)' : 'transparent',
                             border: 0,
                             borderBottom: '1px solid var(--line-soft)',
                             color: 'inherit',
@@ -1259,7 +1525,15 @@ export default function Studio() {
                             cursor: 'pointer',
                             textAlign: 'left',
                           }}
-                          onClick={() => setSelected(item.id)}
+                          onClick={(event) =>
+                            setSelection((current) =>
+                              event.shiftKey
+                                ? current.includes(item.id)
+                                  ? current.filter((entry) => entry !== item.id)
+                                  : [...current, item.id]
+                                : [item.id],
+                            )
+                          }
                         >
                           <span aria-hidden="true">{def.icon}</span>
                           <span className="truncate" style={{ flex: 1, fontSize: 12.5 }}>
@@ -1429,6 +1703,19 @@ export default function Studio() {
 
       {adding && scene ? <ObjectLibraryDialog onClose={() => setAdding(false)} onAdd={addObject} /> : null}
 
+      {arraying && scene ? (
+        <ArrayDialog
+          count={selection.length}
+          span={selectionSpan}
+          onClose={() => setArraying(false)}
+          onApply={(countX, stepX, countZ, stepZ) => {
+            const created = arraySelection(countX, stepX, countZ, stepZ);
+            setArraying(false);
+            toast(created ? `${created} copie(s) posée(s).` : 'Rien à répéter.', created ? 'succes' : 'alerte');
+          }}
+        />
+      ) : null}
+
       {confirmDelete && scene ? (
         <ConfirmDialog
           title="Supprimer cette scène ?"
@@ -1449,6 +1736,75 @@ export default function Studio() {
 }
 
 /** Rappel commercial de l'objet selectionne : ce qui partira dans le devis. */
+/**
+ * Repetition en reseau.
+ *
+ * Le pas est propose a l'emprise de la selection : c'est la valeur juste dans
+ * la quasi-totalite des cas — des tables alignees, une rangee de barrieres —
+ * et elle reste modifiable pour menager un passage entre les rangees.
+ */
+function ArrayDialog({
+  count,
+  span,
+  onClose,
+  onApply,
+}: {
+  count: number;
+  span: { x: number; z: number };
+  onClose: () => void;
+  onApply: (countX: number, stepX: number, countZ: number, stepZ: number) => void;
+}) {
+  const [countX, setCountX] = useState(3);
+  const [stepX, setStepX] = useState(span.x + 0.3);
+  const [countZ, setCountZ] = useState(1);
+  const [stepZ, setStepZ] = useState(span.z + 0.3);
+  const copies = Math.max(0, countX * countZ - 1) * count;
+
+  return (
+    <Modal
+      title="Répéter en réseau"
+      subtitle={`${count} objet(s) recopiés sur une grille`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            Annuler
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={copies <= 0}
+            onClick={() => onApply(countX, stepX, countZ, stepZ)}
+          >
+            Poser {copies} copie(s)
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <div className="grid g2" style={{ gap: 10 }}>
+          <Field label="Colonnes (axe X)">
+            <input type="number" min={1} max={60} step={1} value={countX} onChange={(event) => setCountX(Math.max(1, Number(event.target.value)))} />
+          </Field>
+          <Field label="Pas en X (m)">
+            <input type="number" step={0.1} value={stepX} onChange={(event) => setStepX(Number(event.target.value))} />
+          </Field>
+          <Field label="Rangées (axe Z)">
+            <input type="number" min={1} max={60} step={1} value={countZ} onChange={(event) => setCountZ(Math.max(1, Number(event.target.value)))} />
+          </Field>
+          <Field label="Pas en Z (m)">
+            <input type="number" step={0.1} value={stepZ} onChange={(event) => setStepZ(Number(event.target.value))} />
+          </Field>
+        </div>
+        <div className="small dim">
+          Emprise de la sélection : {num(span.x, 2)} × {num(span.z, 2)} m. Un pas inférieur à l’emprise fait se
+          chevaucher les copies.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function SelectedProductCard({ item, size }: { item: SceneItem; size: [number, number, number] }) {
   const { db } = useStore();
   const def = objectDef(item.model3d);

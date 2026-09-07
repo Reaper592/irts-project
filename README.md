@@ -19,7 +19,7 @@ en mesurer la rentabilité.
 | **Clients** | Fiches multi-contacts, conditions négociées (délai, remise, encours autorisé), historique documentaire, chiffre d'affaires et encours par client, export CSV. |
 | **Devis** | Éditeur complet : lignes catalogue, packs, import d'une scène 3D, dégressivité de location, remises ligne et globale, acompte, TVA multi-taux, contrôle de disponibilité en temps réel, rentabilité prévisionnelle, signature, conversion en facture, PDF imprimable. |
 | **Factures & avoirs** | Facturation, règlements partiels, statuts recalculés (partiel, payé, en retard), pénalités de retard au taux légal et indemnité de recouvrement, avoirs, relances planifiées, export comptable CSV. |
-| **Studio 3D** | Construction de l'environnement du client en temps réel — salle, plein air, chapiteau, club — implantation du matériel du catalogue, faisceaux volumétriques dans le brouillard, jauge instanciée, cadrages types, export PNG, fiche d'implantation client et génération du devis correspondant. |
+| **Studio 3D** | Terrain dessiné point par point, surfaces libres, sélection multiple, répétition en réseau, décamètre, calques par famille. Construction de l'environnement du client en temps réel — salle, plein air, chapiteau, club — implantation du matériel du catalogue, faisceaux volumétriques dans le brouillard, jauge instanciée, cadrages types, export PNG, fiche d'implantation client et génération du devis correspondant. |
 | **Projets** | Chaque événement avec sa check-list de préparation, son équipe, ses documents, ses frais imputés et sa marge réelle. |
 | **Planning** | Calendrier mensuel des exploitations, chronologie des projets, disponibilité du parc sur une période avec taux de charge par référence. |
 | **Catalogue & parc** | Références de location, vente, prestation et forfait ; numéros de série et états ; barèmes dégressifs ; packs commerciaux ; rendement du parc et détection du matériel sous-exploité. |
@@ -127,8 +127,33 @@ son propre contour libre, sa nature de sol et sa hauteur. Une zone surélevée e
 extrudée et porte ses ombres ; une zone masquée reste dans la scène sans être
 rendue.
 
-Raccourcis : `D` déplacer · `R` tourner · `T` dimensionner · `P` vue en plan ·
-`G` grille · `Suppr` supprimer · `Ctrl+Z` annuler.
+### Sélection multiple, réseau, décamètre, calques
+
+**Maj+clic** ajoute ou retire un objet de la sélection, `Ctrl+A` prend toute la
+scène, et le clic sur une famille dans les calques prend d'un coup tout un
+corps de métier. Dès qu'il y a plusieurs objets, le gizmo se pose sur un pivot
+virtuel au centre de la sélection : le déplacement et l'échelle s'appliquent au
+groupe entier, la rotation se fait autour de la verticale. Aucun objet n'est
+reparenté, donc les coordonnées du modèle restent celles du terrain.
+
+**⊞ Répéter en réseau** recopie la sélection sur une grille — nombre de
+colonnes, nombre de rangées, pas dans chaque direction. Le pas proposé est
+l'emprise de la sélection : trente tables ou une ligne de barrières se posent
+en une fois.
+
+**📏 Décamètre** (`M`) mesure au sol clic par clic : chaque segment porte sa
+longueur, une chaîne affiche son cumul, `Suppr` retire le dernier point et
+`Échap` referme l'outil. C'est ce qu'on cherche pour vérifier un passage
+pompier ou le recul devant une scène.
+
+**Calques** masque une famille entière — le son, les sanitaires, la structure —
+pour montrer une seule couche au client. Les objets masqués restent dans la
+scène et dans le devis : isoler un corps de métier ne doit pas fausser le
+chiffrage.
+
+Raccourcis : `D` déplacer · `R` tourner · `T` dimensionner · `M` décamètre ·
+`P` vue en plan · `G` grille · `Ctrl+A` tout sélectionner · `Suppr` supprimer ·
+`Ctrl+Z` annuler.
 
 ### Chaîne de rendu
 

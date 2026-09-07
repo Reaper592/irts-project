@@ -266,13 +266,22 @@ function beamMaterial(color: THREE.ColorRepresentation, intensity: number, haze:
 /** Cible de l'edition de contour : l'emprise du site ou une zone. */
 export type SurfaceTarget = { kind: 'site' } | { kind: 'zone'; id: string };
 
+/** Une modification d'objet issue du gizmo. */
+export interface TransformChange {
+  id: string;
+  change: Partial<SceneItem>;
+}
+
 export interface EngineHandlers {
-  onSelect: (itemId: string | null) => void;
-  /** Emis a la fin d'une manipulation au gizmo. */
-  onTransform: (itemId: string, change: Partial<SceneItem>) => void;
+  /** `additive` : la touche Maj etait enfoncee — on ajoute a la selection. */
+  onSelect: (itemId: string | null, additive: boolean) => void;
+  /** Emis a la fin d'une manipulation au gizmo, pour tous les objets tenus. */
+  onTransform: (changes: TransformChange[]) => void;
   onHover: (itemId: string | null) => void;
   /** Emis apres modification d'un contour a la souris. */
   onSurfaceChange: (target: SurfaceTarget, points: GroundPoint[]) => void;
+  /** Emis a chaque point pose par le decametre. */
+  onMeasure: (points: GroundPoint[]) => void;
 }
 
 export class StudioEngine {
@@ -296,7 +305,6 @@ export class StudioEngine {
   private frame = 0;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
-  private outline: THREE.Box3Helper | null = null;
   private grid: THREE.GridHelper | null = null;
   private sun = new THREE.DirectionalLight(0xffffff, 2);
   private hemi = new THREE.HemisphereLight(0xbdd7ff, 0x4a4438, 1);
@@ -319,11 +327,23 @@ export class StudioEngine {
   private outlineLine: THREE.LineLoop | null = null;
   private surfacePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
+  private selection: string[] = [];
+  private outlines: THREE.Box3Helper[] = [];
+  /** Pivot virtuel : c'est lui que tient le gizmo quand plusieurs objets sont pris. */
+  private pivot = new THREE.Object3D();
+  private pivotStart = new THREE.Vector3();
+  private groupStart = new Map<string, { position: THREE.Vector3; rotY: number; scale: THREE.Vector3 }>();
+
+  private measuring = false;
+  private measurePoints: GroundPoint[] = [];
+  private measureGroup = new THREE.Group();
+
   handlers: EngineHandlers = {
     onSelect: () => {},
     onTransform: () => {},
     onHover: () => {},
     onSurfaceChange: () => {},
+    onMeasure: () => {},
   };
 
   /** Diagnostic de la chaine de rendu, pour le support et les tests. */
@@ -349,6 +369,10 @@ export class StudioEngine {
       shadowBox: [camera.left, camera.right, camera.top, camera.bottom, camera.near, camera.far].map((v) => Math.round(v)),
       casters,
       receivers,
+      items: this.content.children.length,
+      visibleItems: this.content.children.filter((node) => node.visible).length,
+      selection: this.selection.length,
+      measurePoints: this.measurePoints.length,
       passes: this.composer.passes.map((pass) => pass.constructor.name),
     };
   }
@@ -392,6 +416,9 @@ export class StudioEngine {
       this.controls.enabled = !(event as unknown as { value: boolean }).value;
       if (!(event as unknown as { value: boolean }).value) this.commitTransform();
     });
+    // Le pivot n'existe que le temps d'une manipulation multiple : c'est lui
+    // que deplace le gizmo, les objets suivent a chaque image.
+    this.gizmo.addEventListener('objectChange', () => this.followPivot());
     const helper = this.gizmo.getHelper();
     helper.visible = false;
     this.scene.add(helper);
@@ -404,7 +431,7 @@ export class StudioEngine {
     this.sun.shadow.blurSamples = 16;
     this.scene.add(this.sun, this.sun.target, this.hemi);
     this.dimensions.visible = false;
-    this.scene.add(this.content, this.helpers, this.dimensions, this.surfaceHandles);
+    this.scene.add(this.content, this.helpers, this.dimensions, this.surfaceHandles, this.measureGroup, this.pivot);
 
     this.buildComposer('equilibre');
 
@@ -555,6 +582,10 @@ export class StudioEngine {
       this.renderer.domElement.style.cursor = this.hoveredHandle ? 'grab' : 'crosshair';
       return;
     }
+    if (this.measuring) {
+      this.renderer.domElement.style.cursor = 'crosshair';
+      return;
+    }
     const hit = this.pick(event);
     this.handlers.onHover(hit);
     this.renderer.domElement.style.cursor = hit ? 'pointer' : 'default';
@@ -576,8 +607,16 @@ export class StudioEngine {
     if (moved > 5 || performance.now() - this.downAt.time > 600) return;
     if ((this.gizmo as unknown as { dragging: boolean }).dragging) return;
     if (this.surfaceTarget) return;
+    if (this.measuring) {
+      const point = this.groundPoint(event);
+      if (!point) return;
+      this.measurePoints.push(point);
+      this.drawMeasure();
+      this.handlers.onMeasure(this.measurePoints.map((entry) => ({ ...entry })));
+      return;
+    }
     const hit = this.pick(event);
-    this.handlers.onSelect(hit);
+    this.handlers.onSelect(hit, event.shiftKey);
   };
 
   private pick(event: PointerEvent): string | null {
@@ -601,6 +640,20 @@ export class StudioEngine {
 
   setTransformMode(mode: TransformMode) {
     this.gizmo.setMode(mode);
+    // Le choix des axes depend du mode ET du nombre d'objets tenus.
+    if (this.selection.length > 1) this.selectMany(this.selection);
+  }
+
+  /** Identifiants actuellement selectionnes. */
+  getSelection(): string[] {
+    return [...this.selection];
+  }
+
+  /** Identifiants de tous les objets poses, dans l'ordre de la scene. */
+  allItemIds(): string[] {
+    return this.content.children
+      .map((node) => node.userData.itemId as string | undefined)
+      .filter((id): id is string => Boolean(id));
   }
 
   setSnap(step: number) {
@@ -610,57 +663,236 @@ export class StudioEngine {
   }
 
   selectById(itemId: string | null) {
+    this.selectMany(itemId ? [itemId] : []);
+  }
+
+  /**
+   * Selection multiple.
+   *
+   * Un seul objet : le gizmo se pose dessus, comme avant. Plusieurs : il se
+   * pose sur un pivot virtuel place au centre de la selection, et les objets
+   * suivent le mouvement du pivot. C'est la seule facon de deplacer un groupe
+   * sans reparenter les objets — un reparentage changerait leurs coordonnees
+   * dans le modele.
+   */
+  selectMany(ids: string[]) {
     this.outlineOff();
     const helper = this.gizmo.getHelper();
-    if (!itemId) {
-      this.gizmo.detach();
-      helper.visible = false;
-      return;
+    this.gizmo.detach();
+    helper.visible = false;
+
+    const nodes = ids
+      .map((id) => this.content.children.find((child) => child.userData.itemId === id))
+      .filter((node): node is THREE.Object3D => Boolean(node));
+    this.selection = nodes.map((node) => node.userData.itemId as string);
+
+    for (const node of nodes) {
+      const box = new THREE.Box3().setFromObject(node).expandByScalar(0.06);
+      const outline = new THREE.Box3Helper(box, new THREE.Color(nodes.length > 1 ? '#7bc2ff' : '#3987e5'));
+      this.outlines.push(outline);
+      this.helpers.add(outline);
     }
-    const node = this.content.children.find((child) => child.userData.itemId === itemId) ?? null;
-    if (!node) {
-      this.gizmo.detach();
-      helper.visible = false;
-      return;
-    }
-    const box = new THREE.Box3().setFromObject(node).expandByScalar(0.06);
-    this.outline = new THREE.Box3Helper(box, new THREE.Color('#3987e5'));
-    this.helpers.add(this.outline);
-    if (node.userData.locked) {
-      this.gizmo.detach();
-      helper.visible = false;
-    } else {
-      this.gizmo.attach(node);
+    if (!nodes.length || this.measuring || this.surfaceTarget) return;
+
+    const movable = nodes.filter((node) => !node.userData.locked);
+    if (!movable.length) return;
+
+    if (movable.length === 1) {
+      this.gizmo.attach(movable[0]);
+      this.gizmo.showX = true;
+      this.gizmo.showY = true;
+      this.gizmo.showZ = true;
       helper.visible = true;
+      return;
+    }
+
+    this.resetPivot(movable);
+    this.gizmo.attach(this.pivot);
+    // En rotation, un groupe ne tourne qu'autour de la verticale : le modele
+    // ne stocke pas de roulis, et un basculement serait perdu a l'ecriture.
+    const rotating = this.gizmo.getMode() === 'rotate';
+    this.gizmo.showX = !rotating;
+    this.gizmo.showY = true;
+    this.gizmo.showZ = !rotating;
+    helper.visible = true;
+  }
+
+  /** Replace le pivot au centre de la selection et memorise l'etat de depart. */
+  private resetPivot(nodes: THREE.Object3D[]) {
+    const centre = new THREE.Vector3();
+    for (const node of nodes) centre.add(node.position);
+    centre.divideScalar(nodes.length);
+    this.pivot.position.copy(centre);
+    this.pivot.rotation.set(0, 0, 0);
+    this.pivot.scale.set(1, 1, 1);
+    this.pivot.updateMatrixWorld(true);
+    this.pivotStart.copy(centre);
+    this.groupStart.clear();
+    for (const node of nodes) {
+      this.groupStart.set(node.userData.itemId as string, {
+        position: node.position.clone(),
+        rotY: node.rotation.y,
+        scale: node.scale.clone(),
+      });
+    }
+  }
+
+  /** Applique au groupe le deplacement, la rotation et l'echelle du pivot. */
+  private followPivot() {
+    if (this.gizmo.object !== this.pivot || !this.groupStart.size) return;
+    const delta = new THREE.Vector3().subVectors(this.pivot.position, this.pivotStart);
+    const spin = this.pivot.rotation.y;
+    const factor = this.pivot.scale;
+    const offset = new THREE.Vector3();
+    for (const node of this.content.children) {
+      const start = this.groupStart.get(node.userData.itemId as string);
+      if (!start) continue;
+      offset.subVectors(start.position, this.pivotStart).multiply(factor).applyAxisAngle(UP, spin);
+      node.position.copy(this.pivotStart).add(offset).add(delta);
+      node.rotation.y = start.rotY + spin;
+      node.scale.copy(start.scale).multiply(factor);
     }
   }
 
   private outlineOff() {
-    if (!this.outline) return;
-    this.helpers.remove(this.outline);
-    this.outline.geometry.dispose();
-    this.outline = null;
+    for (const outline of this.outlines) {
+      this.helpers.remove(outline);
+      outline.geometry.dispose();
+    }
+    this.outlines = [];
   }
 
   /** Renvoie a l'application la position, la rotation et les cotes obtenues. */
   private commitTransform() {
+    const scaling = this.gizmo.getMode() === 'scale';
+    const read = (node: THREE.Object3D): TransformChange => {
+      const nominal = node.userData.nominal as [number, number, number];
+      const change: Partial<SceneItem> = {
+        x: round(node.position.x),
+        y: round(node.position.y),
+        z: round(node.position.z),
+        rotY: round(node.rotation.y, 3),
+        rotX: round(node.rotation.x, 3),
+      };
+      if (scaling) {
+        change.width = round(nominal[0] * node.scale.x);
+        change.height = round(nominal[1] * node.scale.y);
+        change.depth = round(nominal[2] * node.scale.z);
+      }
+      return { id: node.userData.itemId as string, change };
+    };
+
+    if (this.gizmo.object === this.pivot) {
+      const moved = this.content.children.filter((node) => this.groupStart.has(node.userData.itemId as string));
+      if (!moved.length) return;
+      this.handlers.onTransform(moved.map(read));
+      // Le pivot repart de zero : sans cela, la rotation deja appliquee
+      // s'ajouterait a la suivante et le groupe partirait en vrille.
+      this.resetPivot(moved);
+      return;
+    }
+
     const node = this.gizmo.object;
     if (!node?.userData.itemId) return;
-    const id = node.userData.itemId as string;
-    const nominal = node.userData.nominal as [number, number, number];
-    const change: Partial<SceneItem> = {
-      x: round(node.position.x),
-      y: round(node.position.y),
-      z: round(node.position.z),
-      rotY: round(node.rotation.y, 3),
-      rotX: round(node.rotation.x, 3),
-    };
-    if (this.gizmo.getMode() === 'scale') {
-      change.width = round(nominal[0] * node.scale.x);
-      change.height = round(nominal[1] * node.scale.y);
-      change.depth = round(nominal[2] * node.scale.z);
+    this.handlers.onTransform([read(node)]);
+  }
+
+  /* ---------------------------------------------------------- decametre */
+
+  /**
+   * Decametre : chaque clic pose un point au sol, chaque segment porte sa
+   * longueur, et une chaine de plusieurs segments affiche son cumul. C'est
+   * l'outil qu'on cherche des qu'il faut verifier un passage pompier ou le
+   * recul devant une scene.
+   */
+  setMeasureMode(active: boolean) {
+    this.measuring = active;
+    this.measurePoints = [];
+    this.drawMeasure();
+    this.renderer.domElement.style.cursor = active ? 'crosshair' : 'default';
+    if (active) {
+      this.gizmo.detach();
+      this.gizmo.getHelper().visible = false;
+      this.outlineOff();
     }
-    this.handlers.onTransform(id, change);
+    this.handlers.onMeasure([]);
+  }
+
+  isMeasuring(): boolean {
+    return this.measuring;
+  }
+
+  /** Retire le dernier point pose ; vide la chaine si elle n'en a qu'un. */
+  undoMeasurePoint() {
+    this.measurePoints.pop();
+    this.drawMeasure();
+    this.handlers.onMeasure(this.measurePoints.map((point) => ({ ...point })));
+  }
+
+  clearMeasure() {
+    this.measurePoints = [];
+    this.drawMeasure();
+    this.handlers.onMeasure([]);
+  }
+
+  private drawMeasure() {
+    while (this.measureGroup.children.length) {
+      const child = this.measureGroup.children[0] as THREE.Mesh;
+      this.measureGroup.remove(child);
+      child.geometry?.dispose?.();
+    }
+    const points = this.measurePoints;
+    if (!points.length) return;
+
+    const span = this.model ? Math.max(this.model.width, this.model.depth) : 30;
+    const radius = Math.max(0.12, span * 0.007);
+    const marker = new THREE.SphereGeometry(radius, 12, 10);
+    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xffc857, depthTest: false, toneMapped: false });
+    for (const point of points) {
+      const dot = new THREE.Mesh(marker, markerMaterial);
+      dot.position.set(point.x, 0.08, point.z);
+      dot.renderOrder = 6;
+      this.measureGroup.add(dot);
+    }
+
+    if (points.length < 2) return;
+    const vertices = points.map((point) => new THREE.Vector3(point.x, 0.08, point.z));
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(vertices),
+      new THREE.LineBasicMaterial({ color: 0xffc857, depthTest: false, toneMapped: false }),
+    );
+    line.renderOrder = 6;
+    this.measureGroup.add(line);
+
+    // Taille figee a l'ecran : une cote de mesure doit rester lisible qu'on
+    // soit au ras du sol ou en vue d'ensemble.
+    const scale = 0.028;
+    let total = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      const a = points[index - 1];
+      const b = points[index];
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      total += length;
+      const label = textSprite(
+        `${length.toFixed(2).replace('.', ',')} m`,
+        new THREE.Vector3((a.x + b.x) / 2, 0.3, (a.z + b.z) / 2),
+        scale,
+        { screen: true, tint: '#ffd98a' },
+      );
+      label.renderOrder = 7;
+      this.measureGroup.add(label);
+    }
+    if (points.length > 2) {
+      const last = points[points.length - 1];
+      const label = textSprite(
+        `cumul ${total.toFixed(2).replace('.', ',')} m`,
+        new THREE.Vector3(last.x, 0.9, last.z),
+        scale * 1.15,
+        { screen: true, tint: '#ffc857' },
+      );
+      label.renderOrder = 7;
+      this.measureGroup.add(label);
+    }
   }
 
 
@@ -971,6 +1203,10 @@ export class StudioEngine {
   /* ---------------------------------------------------- construction scene */
 
   build(model: SceneModel) {
+    if (this.builtScene !== model.id) {
+      this.selection = [];
+      this.measurePoints = [];
+    }
     this.model = structuredClone(model);
     this.beams = [];
     this.outlineOff();
@@ -994,6 +1230,8 @@ export class StudioEngine {
     for (const item of model.items) this.addItem(item, model);
 
     this.refreshHandles();
+    this.drawMeasure();
+    if (this.selection.length) this.selectMany(this.selection);
     this.applySettings(model);
     this.setQuality(model.quality);
     this.updatePlanFrustum();
@@ -1029,6 +1267,10 @@ export class StudioEngine {
     holder.userData.itemId = item.id;
     holder.userData.locked = item.locked;
     holder.userData.nominal = size;
+    // Calque de famille : l'objet reste dans la scene et dans le devis, il
+    // n'est simplement plus dessine. Masquer en supprimant fausserait le
+    // chiffrage a chaque fois qu'on isole un corps de metier.
+    holder.visible = !(model.hiddenFamilies ?? []).includes(def.family);
     this.content.add(holder);
   }
 
@@ -1352,28 +1594,50 @@ export class StudioEngine {
   }
 }
 
+/** Axe vertical, reutilise a chaque rotation de groupe. */
+const UP = new THREE.Vector3(0, 1, 0);
+
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
 
-/** Etiquette de cote : un texte plat, lisible depuis n'importe quel angle. */
-function textSprite(text: string, position: THREE.Vector3, scale: number): THREE.Sprite {
+/**
+ * Etiquette de cote : un texte plat, lisible depuis n'importe quel angle.
+ *
+ * `screen` fige la taille en pixels au lieu de la lier au monde : une cote
+ * doit rester lisible quand on s'eloigne, alors qu'une cote de terrain doit
+ * rester a l'echelle du plan.
+ */
+function textSprite(
+  text: string,
+  position: THREE.Vector3,
+  scale: number,
+  options: { screen?: boolean; tint?: string } = {},
+): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 64;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = 'rgba(12,16,22,0.82)';
+  ctx.fillStyle = 'rgba(12,16,22,0.86)';
   ctx.roundRect(4, 8, 248, 48, 10);
   ctx.fill();
-  ctx.fillStyle = '#e6edf6';
+  ctx.fillStyle = options.tint ?? '#e6edf6';
   ctx.font = '600 30px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 128, 33);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      transparent: true,
+      toneMapped: false,
+      sizeAttenuation: !options.screen,
+    }),
+  );
   sprite.position.copy(position);
   sprite.scale.set(scale * 4, scale, 1);
   return sprite;
