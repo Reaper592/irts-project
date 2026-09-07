@@ -443,19 +443,28 @@ export default function Studio() {
     engine.setPlanMode(true);
     const plan = engine.screenshot();
     engine.setPlanMode(false);
-    engine.setCamera('face');
+    // Vue plongeante plutot que frontale : c'est elle qui fait comprendre une
+    // implantation d'un coup d'oeil, la face masque tout ce qui est derriere.
+    engine.setCamera('plongee');
     const perspective = engine.screenshot();
     if (wasPlan) engine.setPlanMode(true);
 
     const company = companyOf(scene.entity);
     const client = db.clients.find((entry) => entry.id === scene.clientId);
-    const byFamily = new Map<string, { label: string; qty: number; size: string }[]>();
+    // Nomenclature regroupee par modele et par cote : le client lit « 18 bancs
+    // brasserie », pas « Banc 1, Banc 2, Banc 3 ». Le libelle retenu est celui
+    // de la bibliotheque, les numeros de pose n'ont d'interet que sur le plan.
+    const byFamily = new Map<string, Map<string, { label: string; qty: number; size: string }>>();
     for (const item of scene.items) {
       const def = objectDef(item.model3d);
       const [w, h, d] = itemSize(item.model3d, item);
-      const list = byFamily.get(def.family) ?? [];
-      list.push({ label: item.label, qty: item.qty, size: `${num(w, 2)} × ${num(h, 2)} × ${num(d, 2)} m` });
-      byFamily.set(def.family, list);
+      const size = `${num(w, 2)} × ${num(h, 2)} × ${num(d, 2)} m`;
+      const group = byFamily.get(def.family) ?? new Map();
+      const key = `${item.model3d}|${size}`;
+      const found = group.get(key);
+      if (found) found.qty += Math.max(1, item.qty);
+      else group.set(key, { label: def.label, qty: Math.max(1, item.qty), size });
+      byFamily.set(def.family, group);
     }
 
     const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${esc(scene.name)}</title>
@@ -502,7 +511,8 @@ export default function Studio() {
   <table><thead><tr><th>Famille</th><th>Élément</th><th class="n">Qté</th><th class="n">Dimensions</th></tr></thead><tbody>
   ${[...byFamily.entries()]
     .map(([family, items]) =>
-      items
+      [...items.values()]
+        .sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label, 'fr'))
         .map(
           (entry, index) =>
             `<tr><td>${index === 0 ? esc(family) : ''}</td><td>${esc(entry.label)}</td><td class="n">${entry.qty}</td><td class="n">${entry.size}</td></tr>`,

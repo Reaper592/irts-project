@@ -1219,7 +1219,10 @@ export class StudioEngine {
     const model = this.model;
     if (!model) return;
     const aspect = Math.max(0.2, this.host.clientWidth / Math.max(1, this.host.clientHeight));
-    const half = Math.max(model.width, model.depth) * 0.62;
+    // Cadrage sur l'emprise reelle plutot que sur sa plus grande dimension :
+    // un terrain large et peu profond occupait sinon le tiers de la page.
+    // La marge laisse la place aux cotes tracees autour du contour.
+    const half = Math.max(model.depth / 2, model.width / (2 * aspect)) * 1.32;
     this.planCamera.left = -half * aspect;
     this.planCamera.right = half * aspect;
     this.planCamera.top = half;
