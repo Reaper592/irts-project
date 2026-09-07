@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Category, Company, Database, DocKind, EntityId, Scope, TaxonomyDomain } from './types';
+import type { Category, Company, Database, DocKind, EntityId, Scene, Scope, TaxonomyDomain } from './types';
 import { createSeedDatabase } from './seed';
 import { inScope } from './utils';
 import {
@@ -75,7 +75,19 @@ export function migrate(db: Partial<Database>): Database {
     ...project,
     categoryId: project.categoryId ?? null,
   }));
-  merged.scenes = (merged.scenes ?? []).map((scene) => ({
+  merged.scenes = (merged.scenes ?? []).map(normalizeScene);
+  return merged;
+}
+
+/**
+ * Complete une scene avec les champs apparus depuis sa creation.
+ *
+ * Utilise a la migration de la base, mais aussi a l'import d'un fichier de
+ * scene : un export d'une version anterieure doit s'ouvrir sans manquer une
+ * emprise, une qualite de rendu ou un calque.
+ */
+export function normalizeScene(scene: Partial<Scene>): Scene {
+  return {
     ...scene,
     groundShape: scene.groundShape ?? 'rectangle',
     polygon: scene.polygon?.length ? scene.polygon : defaultPolygon(scene.width ?? 20, scene.depth ?? 16),
@@ -102,8 +114,7 @@ export function migrate(db: Partial<Database>): Database {
       locked: item.locked ?? false,
       notes: item.notes ?? '',
     })),
-  }));
-  return merged;
+  } as Scene;
 }
 
 /** Emprise par defaut : le rectangle du terrain, prete a etre deformee. */

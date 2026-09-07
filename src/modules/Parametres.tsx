@@ -452,9 +452,17 @@ export default function Parametres() {
               </button>
             </div>
             <div style={{ marginTop: 12 }}>
-              <Badge tone="info" icon="ℹ">
-                Stockage local du navigateur — aucune donnée ne quitte ce poste
-              </Badge>
+              {/* Le message doit dire ou vivent reellement les donnees : en mode
+                  partage, elles sont sur le poste serveur, pas seulement ici. */}
+              {sync.status === 'connecte' ? (
+                <Badge tone="info" icon="ℹ">
+                  Base partagée sur le poste serveur — la sauvegarde exportée est celle de tout le réseau
+                </Badge>
+              ) : (
+                <Badge tone="info" icon="ℹ">
+                  Stockage local du navigateur — aucune donnée ne quitte ce poste
+                </Badge>
+              )}
             </div>
           </Card>
 

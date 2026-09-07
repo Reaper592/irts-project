@@ -154,6 +154,11 @@ pour montrer une seule couche au client. Les objets masqués restent dans la
 scène et dans le devis : isoler un corps de métier ne doit pas fausser le
 chiffrage.
 
+Une scène s'exporte en JSON et se réimporte : le fichier passe par la même
+normalisation que la base, reçoit des identifiants neufs pour ne rien écraser,
+et un export d'une version antérieure s'ouvre sans manquer une emprise, une
+qualité de rendu ou un calque.
+
 Raccourcis : `D` déplacer · `R` tourner · `T` dimensionner · `M` décamètre ·
 `P` vue en plan · `G` grille · `Ctrl+A` tout sélectionner · `Suppr` supprimer ·
 `Ctrl+Z` annuler.

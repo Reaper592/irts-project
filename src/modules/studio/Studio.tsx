@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../../core/store';
+import { normalizeScene, useStore } from '../../core/store';
 import { useNav } from '../../core/nav';
 import { StudioEngine, groundArea, polygonArea, type CameraPreset, type SurfaceTarget, type TransformMode } from './engine';
 import { GROUND_KINDS, OBJECT_LIBRARY, billableUnits, itemSize, objectDef, productIdForRef } from './library';
@@ -135,6 +135,7 @@ export default function Studio() {
   const [history, setHistory] = useState<{ past: Scene[]; future: Scene[] }>({ past: [], future: [] });
 
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const engineRef = useRef<StudioEngine | null>(null);
   const scene = scenes.find((entry) => entry.id === sceneId) ?? null;
   const sceneRef = useRef<Scene | null>(scene);
@@ -703,6 +704,42 @@ export default function Studio() {
     [selection, pushHistory, update],
   );
 
+  /**
+   * Reprend une scene exportee.
+   *
+   * Le fichier peut venir d'une version anterieure ou d'un autre poste : il
+   * passe par la meme normalisation que la base, recoit un identifiant neuf
+   * pour ne rien ecraser, et ses objets aussi — deux copies d'un meme export
+   * doivent pouvoir cohabiter.
+   */
+  const importScene = useCallback(
+    async (file: File) => {
+      try {
+        const parsed = JSON.parse(await file.text()) as Partial<Scene>;
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
+          toast('Ce fichier n’est pas une scène du Studio.', 'alerte');
+          return;
+        }
+        const created = normalizeScene({
+          ...parsed,
+          id: uid('scn'),
+          entity: parsed.entity && db.companies.some((entry) => entry.id === parsed.entity) ? parsed.entity : defaultEntity,
+          name: `${parsed.name ?? 'Scène importée'} (import)`,
+          createdAt: today(),
+          items: (parsed.items ?? []).map((item) => ({ ...item, id: uid('si') })),
+          zones: (parsed.zones ?? []).map((zone) => ({ ...zone, id: uid('zone') })),
+        });
+        update((draft) => void draft.scenes.unshift(created));
+        setSceneId(created.id);
+        setSelection([]);
+        toast(`Scène « ${created.name} » importée — ${created.items.length} objet(s).`, 'succes');
+      } catch {
+        toast('Fichier illisible : JSON invalide.', 'alerte');
+      }
+    },
+    [db.companies, defaultEntity, update, toast],
+  );
+
   /** Repose la selection sur le terrain et ecrit les hauteurs corrigees. */
   const dropSelectionToGround = useCallback(() => {
     const changes = engineRef.current?.dropToGround(selection) ?? [];
@@ -916,6 +953,20 @@ export default function Studio() {
               >
                 Exporter la scène
               </button>
+              <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
+                Importer une scène
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/json"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importScene(file);
+                  event.target.value = '';
+                }}
+              />
               <span className="spacer" />
               <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)}>
                 Supprimer la scène
