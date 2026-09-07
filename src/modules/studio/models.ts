@@ -78,7 +78,11 @@ function roundedBox(w: number, h: number, d: number, radius = 0.02): THREE.Buffe
       curveSegments: 4,
     });
     geometry.rotateX(-Math.PI / 2);
-    geometry.translate(0, h / 2, 0);
+    // ExtrudeGeometry part de zero et le biseau deborde de `r` de chaque cote :
+    // apres rotation le volume occupe [-r, h-r]. Il faut donc le recentrer sur
+    // son milieu, comme toutes les primitives de three.js, sinon chaque
+    // appelant qui le pose a h/2 le fait leviter de sa propre hauteur.
+    geometry.translate(0, r - h / 2, 0);
     geometry.computeVertexNormals();
     return geometry;
   });
@@ -329,6 +333,16 @@ function personGeometry(seated: boolean): THREE.BufferGeometry {
     const legs = new THREE.BoxGeometry(0.32, 0.16, 0.42);
     legs.translate(0, 0.46, 0.18);
     parts.push(legs);
+    // Tibias et pieds : une personne assise garde les pieds au sol. Sans eux,
+    // la silhouette flotte a hauteur d'assise des qu'on la pose sur l'herbe.
+    for (const side of [-1, 1]) {
+      const shin = new THREE.CapsuleGeometry(0.055, 0.24, 4, 8);
+      shin.translate(side * 0.09, 0.175, 0.34);
+      parts.push(shin);
+      const foot = new THREE.BoxGeometry(0.1, 0.06, 0.22);
+      foot.translate(side * 0.09, 0.03, 0.42);
+      parts.push(foot);
+    }
     const head = new THREE.SphereGeometry(0.11, 12, 10);
     head.translate(0, 1.06, -0.02);
     parts.push(head);
@@ -341,7 +355,9 @@ function personGeometry(seated: boolean): THREE.BufferGeometry {
     parts.push(head);
     for (const side of [-1, 1]) {
       const leg = new THREE.CapsuleGeometry(0.075, 0.36, 4, 8);
-      leg.translate(side * 0.09, 0.22, 0);
+      // Le rayon de la capsule deborde sous son centre : sans lui, les pieds
+      // s'enfoncent dans le sol.
+      leg.translate(side * 0.09, 0.255, 0);
       parts.push(leg);
     }
   }
@@ -482,12 +498,14 @@ export function buildObject(
       break;
     }
     case 'monitor': {
-      const wedge = solid(box(0.56, 0.34, 0.44), m.caisson, 0, 0.18);
+      // Le caisson bascule autour de son centre : il faut le remonter de la
+      // demi-diagonale verticale pour qu'il repose sur son pan incline.
+      const wedge = solid(box(0.56, 0.34, 0.44), m.caisson, 0, 0.267);
       wedge.rotation.x = -0.62;
       group.add(wedge);
       const front = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.28), m.grille);
       front.rotation.x = -0.62;
-      front.position.set(0, 0.28, 0.16);
+      front.position.set(0, 0.367, 0.16);
       group.add(front);
       break;
     }
@@ -678,12 +696,15 @@ export function buildObject(
         emissiveIntensity: 0.85,
         roughness: 0.42,
       });
-      group.add(solid(box(w + 0.06, h + 0.06, 0.12), m.noirMat, 0, h / 2));
+      // Le cadre deborde de 3 cm : c'est lui qui pose au sol, la dalle est
+      // centree dedans.
+      const centre = (h + 0.06) / 2;
+      group.add(solid(box(w + 0.06, h + 0.06, 0.12), m.noirMat, 0, centre));
       const screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
-      screen.position.set(0, h / 2, 0.062);
+      screen.position.set(0, centre, 0.062);
       group.add(screen);
       const glow = new THREE.RectAreaLight(0x6f9fe0, 1.4, w, h);
-      glow.position.set(0, h / 2, 0.1);
+      glow.position.set(0, centre, 0.1);
       group.add(glow);
       break;
     }
@@ -1120,7 +1141,12 @@ export function buildObject(
       for (let index = 0; index < 90; index += 1) {
         const point = curve.getPoint(index / 89);
         matrix.makeScale(0.7 + Math.random() * 0.8, 0.7 + Math.random() * 0.8, 0.7 + Math.random() * 0.8);
-        matrix.setPosition(point.x + (Math.random() - 0.5) * 0.22, point.y + (Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.25);
+        // Le feuillage se disperse autour du tube mais jamais sous le sol.
+        matrix.setPosition(
+          point.x + (Math.random() - 0.5) * 0.22,
+          Math.max(0.2, point.y + (Math.random() - 0.5) * 0.22),
+          (Math.random() - 0.5) * 0.25,
+        );
         foliage.setMatrixAt(index, matrix);
       }
       foliage.instanceMatrix.needsUpdate = true;
@@ -1174,7 +1200,9 @@ export function buildObject(
       break;
     }
     case 'brasero': {
-      group.add(solid(new THREE.CylinderGeometry(0.4, 0.3, 0.45, 16), m.metal, 0, 0.3));
+      // Couronne de pied posee au sol, puis la vasque au-dessus.
+      group.add(solid(new THREE.CylinderGeometry(0.26, 0.28, 0.07, 16), m.metal, 0, 0.035));
+      group.add(solid(new THREE.CylinderGeometry(0.4, 0.3, 0.45, 16), m.metal, 0, 0.295));
       const fire = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.4, 10), emissive('#ff8a3d', 3.4));
       fire.position.y = 0.68;
       group.add(fire);
@@ -1412,15 +1440,15 @@ export function buildObject(
         const cloth = new THREE.MeshStandardMaterial({ color: 0x2f5e86, roughness: 0.95 });
         const seat = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 1.25, 1, 6), cloth);
         seat.rotation.x = -0.72;
-        seat.position.set(0, 0.5, 0.05);
+        seat.position.set(0, 0.53, 0.05);
         seat.castShadow = true;
         seat.material.side = THREE.DoubleSide;
         group.add(seat);
         for (const side of [-1, 1]) {
-          const rail = solid(post(0.022, 1.35), frame, side * 0.3, 0.5, 0.05);
+          const rail = solid(post(0.022, 1.35), frame, side * 0.3, 0.53, 0.05);
           rail.rotation.x = 0.72;
           group.add(rail);
-          const leg = solid(post(0.022, 0.85), frame, side * 0.3, 0.36, -0.3);
+          const leg = solid(post(0.022, 0.85), frame, side * 0.3, 0.385, -0.3);
           leg.rotation.x = -0.5;
           group.add(leg);
         }

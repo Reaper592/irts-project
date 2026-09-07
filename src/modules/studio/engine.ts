@@ -346,6 +346,31 @@ export class StudioEngine {
     onMeasure: () => {},
   };
 
+  /**
+   * Hauteur du bas de chaque objet au-dessus du sol.
+   *
+   * Un objet pose doit toucher le terrain : une maquette ou tout flotte de
+   * quelques centimetres se voit immediatement, et aucune cote n'est alors
+   * fiable. Ce releve sert au support et aux tests de non-regression.
+   */
+  contactReport(): { id: string; model: string; y: number; bottom: number }[] {
+    const box = new THREE.Box3();
+    const report: { id: string; model: string; y: number; bottom: number }[] = [];
+    for (const node of this.content.children) {
+      const id = node.userData.itemId as string | undefined;
+      if (!id) continue;
+      const item = this.model?.items.find((entry) => entry.id === id);
+      box.setFromObject(node);
+      report.push({
+        id,
+        model: item?.model3d ?? '?',
+        y: Math.round((item?.y ?? 0) * 1000) / 1000,
+        bottom: Math.round(box.min.y * 1000) / 1000,
+      });
+    }
+    return report;
+  }
+
   /** Diagnostic de la chaine de rendu, pour le support et les tests. */
   diagnostics() {
     let casters = 0;

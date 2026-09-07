@@ -167,8 +167,12 @@ irradiance d'intérieur débouche les ombres au point de les faire disparaître 
 extérieur. Le brouillard prend la couleur de l'horizon, ce qui fond le sol
 lointain dans la voûte au lieu de l'arrêter sur une arête.
 
-Le moteur expose `window.irtsStudio.diagnostics()` : état des ombres, des
-passes de rendu et de l'éclairage, pour le support et les tests de rendu.
+Le moteur expose deux relevés pour le support et les tests de non-régression :
+`window.irtsStudio.diagnostics()` donne l'état des ombres, des passes de rendu
+et de l'éclairage ; `window.irtsStudio.contactReport()` donne, pour chaque
+objet posé, la hauteur du bas de sa boîte englobante. Un objet posé au sol doit
+y lire zéro — seuls les objets accrochés (guirlandes, ponts, lyres) descendent
+sous leur point d'accroche.
 
 ## Structure
 
