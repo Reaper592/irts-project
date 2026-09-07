@@ -20,6 +20,7 @@ function canvasTexture(key: string, size: number, paint: Painter, repeat: [numbe
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   paint(ctx, size);
+  SOURCES.set(key, canvas);
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -29,6 +30,69 @@ function canvasTexture(key: string, size: number, paint: Painter, repeat: [numbe
   CACHE.set(key, texture);
   return texture;
 }
+
+
+/**
+ * Taches larges et douces, superposees a la texture fine.
+ *
+ * Une texture carrelee se trahit par sa repetition : c'est la variation a
+ * grande echelle — des zones un peu plus claires, un peu plus sombres — qui
+ * fait qu'un sol reel ne se lit pas comme un damier.
+ */
+function macroVariation(ctx: CanvasRenderingContext2D, size: number, amount: number, count = 26) {
+  ctx.save();
+  for (let index = 0; index < count; index += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = size * (0.12 + Math.random() * 0.3);
+    const light = Math.random() > 0.5;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    const tint = light ? 255 : 0;
+    gradient.addColorStop(0, `rgba(${tint},${tint},${tint},${amount})`);
+    gradient.addColorStop(1, `rgba(${tint},${tint},${tint},0)`);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * Carte de rugosite deduite de la texture : les zones sombres d'un sol sont
+ * generalement les plus humides et les plus lisses. Sans variation de
+ * rugosite, une surface renvoie la lumiere de maniere uniforme et parait
+ * plastique.
+ */
+function roughnessFrom(key: string, source: HTMLCanvasElement, base: number, spread: number): THREE.CanvasTexture {
+  const cached = ROUGHNESS.get(key);
+  if (cached) return cached;
+  const size = source.width;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+  const image = ctx.getImageData(0, 0, size, size);
+  for (let index = 0; index < image.data.length; index += 4) {
+    const luminance =
+      (image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114) / 255;
+    const value = clamp((base + (luminance - 0.5) * spread) * 255);
+    image.data[index] = value;
+    image.data[index + 1] = value;
+    image.data[index + 2] = value;
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 8;
+  ROUGHNESS.set(key, texture);
+  return texture;
+}
+
+const ROUGHNESS = new Map<string, THREE.CanvasTexture>();
+const SOURCES = new Map<string, HTMLCanvasElement>();
 
 function grain(ctx: CanvasRenderingContext2D, size: number, amount: number) {
   const image = ctx.getImageData(0, 0, size, size);
@@ -52,38 +116,66 @@ function fill(ctx: CanvasRenderingContext2D, size: number, color: string) {
 
 /* ------------------------------------------------------------------- sols */
 
+/** Emprise de reference des cadences de texture, en metres. */
+const REFERENCE_SPAN = 34;
+
 const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughness: number; metalness: number }> = {
   herbe: {
-    repeat: 40,
-    roughness: 0.95,
+    repeat: 26,
+    roughness: 0.94,
     metalness: 0,
     paint: (ctx, size) => {
-      fill(ctx, size, '#3f5a2c');
-      for (let index = 0; index < size * 22; index += 1) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const shade = 30 + Math.random() * 60;
-        ctx.strokeStyle = `rgba(${shade + 30},${shade + 70},${shade + 20},0.55)`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + (Math.random() - 0.5) * 4, y - 2 - Math.random() * 5);
-        ctx.stroke();
+      fill(ctx, size, '#3b5529');
+      // Touffes : des paquets d'herbe plutot qu'un semis regulier.
+      for (let clump = 0; clump < 220; clump += 1) {
+        const cx = Math.random() * size;
+        const cy = Math.random() * size;
+        const spread = 6 + Math.random() * 16;
+        const hue = 88 + Math.random() * 26;
+        const light = 22 + Math.random() * 20;
+        for (let blade = 0; blade < 26; blade += 1) {
+          const x = cx + (Math.random() - 0.5) * spread;
+          const y = cy + (Math.random() - 0.5) * spread;
+          ctx.strokeStyle = `hsla(${hue}, ${34 + Math.random() * 22}%, ${light + Math.random() * 14}%, 0.75)`;
+          ctx.lineWidth = 0.8 + Math.random() * 0.8;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.quadraticCurveTo(
+            x + (Math.random() - 0.5) * 3,
+            y - 3 - Math.random() * 4,
+            x + (Math.random() - 0.5) * 6,
+            y - 5 - Math.random() * 7,
+          );
+          ctx.stroke();
+        }
       }
-      grain(ctx, size, 22);
+      macroVariation(ctx, size, 0.05, 30);
+      grain(ctx, size, 14);
     },
   },
   'gazon-tondu': {
-    repeat: 26,
+    repeat: 18,
     roughness: 0.9,
     metalness: 0,
     paint: (ctx, size) => {
-      fill(ctx, size, '#4a6b33');
-      for (let y = 0; y < size; y += 26) {
-        ctx.fillStyle = (y / 26) % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
-        ctx.fillRect(0, y, size, 26);
+      fill(ctx, size, '#476730');
+      const band = size / 8;
+      for (let y = 0; y < size; y += band) {
+        ctx.fillStyle = (y / band) % 2 ? 'rgba(255,255,255,0.055)' : 'rgba(0,0,0,0.07)';
+        ctx.fillRect(0, y, size, band);
       }
-      grain(ctx, size, 16);
+      for (let index = 0; index < 9000; index += 1) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        ctx.strokeStyle = `hsla(${92 + Math.random() * 20}, 32%, ${24 + Math.random() * 16}%, 0.5)`;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (Math.random() - 0.5) * 2, y - 2 - Math.random() * 3);
+        ctx.stroke();
+      }
+      macroVariation(ctx, size, 0.045, 22);
+      grain(ctx, size, 10);
     },
   },
   terre: {
@@ -107,7 +199,18 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
     metalness: 0,
     paint: (ctx, size) => {
       fill(ctx, size, '#a48a5e');
-      grain(ctx, size, 34);
+      for (let index = 0; index < 260; index += 1) {
+        // Ondulations laissees par le vent.
+        ctx.strokeStyle = `rgba(0,0,0,${0.02 + Math.random() * 0.04})`;
+        ctx.lineWidth = 2 + Math.random() * 5;
+        const y = Math.random() * size;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.bezierCurveTo(size / 3, y + 10, (size * 2) / 3, y - 10, size, y);
+        ctx.stroke();
+      }
+      macroVariation(ctx, size, 0.09, 20);
+      grain(ctx, size, 26);
     },
   },
   bitume: {
@@ -116,11 +219,12 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
     metalness: 0.04,
     paint: (ctx, size) => {
       fill(ctx, size, '#2f3236');
-      for (let index = 0; index < 2200; index += 1) {
-        ctx.fillStyle = `rgba(${140 + Math.random() * 70},${140 + Math.random() * 70},${145 + Math.random() * 70},0.14)`;
+      for (let index = 0; index < 9000; index += 1) {
+        ctx.fillStyle = `rgba(${140 + Math.random() * 70},${140 + Math.random() * 70},${145 + Math.random() * 70},0.13)`;
         ctx.fillRect(Math.random() * size, Math.random() * size, 1.6, 1.6);
       }
-      grain(ctx, size, 16);
+      macroVariation(ctx, size, 0.1, 20);
+      grain(ctx, size, 12);
     },
   },
   beton: {
@@ -129,15 +233,16 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
     metalness: 0.03,
     paint: (ctx, size) => {
       fill(ctx, size, '#6d7178');
-      for (let index = 0; index < 40; index += 1) {
-        ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-        ctx.lineWidth = 1 + Math.random() * 2;
+      for (let index = 0; index < 70; index += 1) {
+        ctx.strokeStyle = `rgba(0,0,0,${0.03 + Math.random() * 0.05})`;
+        ctx.lineWidth = 1 + Math.random() * 2.5;
         ctx.beginPath();
         ctx.moveTo(Math.random() * size, Math.random() * size);
         ctx.lineTo(Math.random() * size, Math.random() * size);
         ctx.stroke();
       }
-      grain(ctx, size, 14);
+      macroVariation(ctx, size, 0.09, 24);
+      grain(ctx, size, 12);
     },
   },
   parquet: {
@@ -166,7 +271,12 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
     metalness: 0,
     paint: (ctx, size) => {
       fill(ctx, size, '#3a3129');
-      grain(ctx, size, 26);
+      for (let index = 0; index < 26000; index += 1) {
+        ctx.fillStyle = `rgba(${90 + Math.random() * 60},${78 + Math.random() * 50},${64 + Math.random() * 44},0.08)`;
+        ctx.fillRect(Math.random() * size, Math.random() * size, 1.3, 1.3);
+      }
+      macroVariation(ctx, size, 0.06, 16);
+      grain(ctx, size, 16);
     },
   },
   carrelage: {
@@ -195,29 +305,123 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
     metalness: 0,
     paint: (ctx, size) => {
       fill(ctx, size, '#6a6862');
-      for (let index = 0; index < 1600; index += 1) {
+      for (let index = 0; index < 7000; index += 1) {
         const tone = 90 + Math.random() * 90;
         ctx.fillStyle = `rgb(${tone},${tone - 4},${tone - 12})`;
         ctx.beginPath();
-        ctx.arc(Math.random() * size, Math.random() * size, 1 + Math.random() * 2.4, 0, Math.PI * 2);
+        ctx.arc(Math.random() * size, Math.random() * size, 1.4 + Math.random() * 3, 0, Math.PI * 2);
         ctx.fill();
       }
-      grain(ctx, size, 18);
+      macroVariation(ctx, size, 0.08, 18);
+      grain(ctx, size, 14);
     },
   },
 };
 
-export function groundMaterial(kind: string, tint: string, nightFactor: number): THREE.MeshStandardMaterial {
+/**
+ * Materiau de sol a densite de texture constante, quelle que soit la geometrie.
+ *
+ * `uvSpan` est le nombre de metres couverts par une unite d'UV. Les deux
+ * conventions de three.js coexistent dans la scene et n'ont rien a voir :
+ * `PlaneGeometry` normalise ses UV entre 0 et 1 — un plan de 800 m a donc
+ * uvSpan = 800 — tandis que `ShapeGeometry` et `ExtrudeGeometry` emettent des
+ * UV exprimes directement en coordonnees monde, soit uvSpan = 1. Appliquer la
+ * meme cadence aux deux donne une emprise texturee des centaines de fois plus
+ * fin que ses abords : le sol se lit alors comme un rectangle plus sombre
+ * pose sur le terrain, parce qu'un relief aussi serre assombrit la surface.
+ */
+export function groundMaterial(
+  kind: string,
+  tint: string,
+  nightFactor: number,
+  uvSpan = REFERENCE_SPAN,
+): THREE.MeshStandardMaterial {
   const config = GROUND_PAINTERS[kind] ?? GROUND_PAINTERS.beton;
-  const texture = canvasTexture(`sol_${kind}`, 512, config.paint, [config.repeat, config.repeat]);
-  return new THREE.MeshStandardMaterial({
+  const key = `sol_${kind}`;
+  const base = canvasTexture(key, 1024, config.paint, [config.repeat, config.repeat]);
+  const source = SOURCES.get(key)!;
+  // Cote de la tuile en metres, deduite de la cadence de reference.
+  const tile = REFERENCE_SPAN / config.repeat;
+  const tiles = Math.max(0.05, uvSpan / tile);
+
+  // Chaque plan a sa propre cadence : on clone plutot que de modifier la
+  // texture partagee du cache, sinon le dernier appelant impose la sienne.
+  const texture = base.clone();
+  texture.repeat.set(tiles, tiles);
+  // Repetition en miroir : les motifs peints dans le canvas sont coupes net a
+  // ses bords, et une repetition simple aligne ces coupures en une grille
+  // parfaitement lisible sur une grande surface. Le miroir fait coincider les
+  // bords exactement ; la symetrie qui en resulte est cassee par la variation
+  // basse frequence en espace monde.
+  texture.wrapS = THREE.MirroredRepeatWrapping;
+  texture.wrapT = THREE.MirroredRepeatWrapping;
+  texture.needsUpdate = true;
+
+  const roughness = roughnessFrom(`${key}_r`, source, config.roughness, 0.35).clone();
+  roughness.repeat.set(tiles, tiles);
+  roughness.wrapS = THREE.MirroredRepeatWrapping;
+  roughness.wrapT = THREE.MirroredRepeatWrapping;
+  roughness.needsUpdate = true;
+
+  texture.anisotropy = 16;
+  roughness.anisotropy = 16;
+
+  const material = new THREE.MeshStandardMaterial({
     map: texture,
     bumpMap: texture,
-    bumpScale: 0.22,
-    roughness: config.roughness,
+    bumpScale: 0.3,
+    roughnessMap: roughness,
+    roughness: 1,
     metalness: config.metalness,
     color: new THREE.Color(tint).multiplyScalar(nightFactor),
   });
+  applyMacroBreakup(material);
+  return material;
+}
+
+/**
+ * Rupture du carrelage par bruit en espace monde.
+ *
+ * Une texture repetee des centaines de fois se lit comme un damier, quel que
+ * soit son grain : l'oeil detecte la periodicite avant le detail. Les moteurs
+ * temps reel resolvent cela en modulant l'albedo par un bruit basse frequence
+ * independant des UV. Deux octaves — une vingtaine et une soixantaine de
+ * metres — suffisent a faire disparaitre la grille sans salir la couleur.
+ */
+function applyMacroBreakup(material: THREE.MeshStandardMaterial) {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vMacroPos;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvMacroPos = (modelMatrix * vec4(position, 1.0)).xyz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vMacroPos;
+        float macroHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+        float macroNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float a = macroHash(i);
+          float b = macroHash(i + vec2(1.0, 0.0));
+          float c = macroHash(i + vec2(0.0, 1.0));
+          float d = macroHash(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+        }`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        float macro = macroNoise(vMacroPos.xz * 0.055) * 0.6 + macroNoise(vMacroPos.xz * 0.017) * 0.4;
+        diffuseColor.rgb *= 0.80 + macro * 0.40;`,
+      );
+  };
+  // Deux materiaux au shader different ne doivent pas partager un programme.
+  material.customProgramCacheKey = () => 'macro-breakup';
 }
 
 /* ------------------------------------------------------------- materiaux */
@@ -337,7 +541,10 @@ export function createMaterials(): StudioMaterials {
       ior: 1.45,
     }),
     lentille: new THREE.MeshStandardMaterial({ color: 0x101318, roughness: 0.18, metalness: 0.5 }),
-    foule: new THREE.MeshStandardMaterial({ color: 0x232833, roughness: 0.9, metalness: 0 }),
+    // Blanc de base : la teinte de chaque silhouette vient de sa couleur
+    // d'instance. Une base sombre multipliee par une teinte sombre donnait une
+    // foule de decoupes noires.
+    foule: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0 }),
     feuillage: new THREE.MeshStandardMaterial({ color: 0x35521f, roughness: 0.95, metalness: 0, flatShading: true }),
     tronc: new THREE.MeshStandardMaterial({ color: 0x4a3625, roughness: 0.92, metalness: 0 }),
     moquetteRouge: new THREE.MeshStandardMaterial({ color: 0x7d1f24, roughness: 0.96, metalness: 0 }),

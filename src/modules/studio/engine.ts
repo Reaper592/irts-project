@@ -18,9 +18,10 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { Scene as SceneModel, SceneItem } from '../../core/types';
+import type { GroundPoint, Scene as SceneModel, SceneItem } from '../../core/types';
 import { itemSize, objectDef } from './library';
 import { buildObject } from './models';
 import { createMaterials, groundMaterial, type StudioMaterials } from './materials';
@@ -40,12 +41,99 @@ interface DayProfile {
   sky: [string, string, string];
   /** Intensite de l'environnement issu du ciel physique. */
   env: number;
+  /** Teinte de la lumiere directe : le soleil rougit en descendant. */
+  light: string;
+  /** Astre visible dans la voute : couleur, intensite, elevation (deg). */
+  disc: { color: string; power: number; elevation: number };
 }
 
+/**
+ * Finition photographique appliquee apres le tone mapping.
+ *
+ * Trois effets qu'aucune image de rendu credible n'omet : le vignettage, qui
+ * ramene le regard au centre ; l'aberration chromatique laterale, minuscule,
+ * qui evite l'aspect « image de synthese parfaite » ; et un grain tres fin qui
+ * casse le banding des degrades de ciel.
+ */
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    uVignette: { value: 0.42 },
+    uGrain: { value: 0.03 },
+    uAberration: { value: 0.0016 },
+    uTime: { value: 0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uVignette;
+    uniform float uGrain;
+    uniform float uAberration;
+    uniform float uTime;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    }
+
+    void main() {
+      vec2 centered = vUv - 0.5;
+      float r2 = dot(centered, centered);
+
+      // L'aberration croit avec la distance au centre, comme sur un objectif.
+      vec2 offset = centered * uAberration * r2 * 4.0;
+      vec4 color;
+      color.r = texture2D(tDiffuse, vUv + offset).r;
+      color.g = texture2D(tDiffuse, vUv).g;
+      color.b = texture2D(tDiffuse, vUv - offset).b;
+      color.a = texture2D(tDiffuse, vUv).a;
+
+      float vignette = 1.0 - uVignette * smoothstep(0.15, 0.72, r2);
+      color.rgb *= vignette;
+
+      float grain = hash(vUv * 1024.0 + uTime) - 0.5;
+      color.rgb += grain * uGrain;
+
+      gl_FragColor = color;
+    }
+  `,
+};
+
+/**
+ * Teintes de vetements observees dans un public : denim, noir, gris, kaki,
+ * blanc casse, et quelques pieces franches. Les repetitions dans la liste
+ * ponderent la palette — le denim et le noir dominent, le rouge est rare.
+ */
+const CROWD_PALETTE = [
+  '#2b3242', '#2b3242', '#1d2129', '#1d2129', '#3c4350', '#4c5462',
+  '#6d6f6b', '#8b8d88', '#c9c4b8', '#e2ded3',
+  '#3f4a35', '#5a5138', '#7a6a4f', '#402a24',
+  '#2f4d63', '#1f3b57', '#6b2f38', '#8c4a2f', '#a8763c', '#3f6b52',
+];
+
 const DAY: Record<SceneModel['timeOfDay'], DayProfile> = {
-  jour: { elevation: 44, turbidity: 4.5, exposure: 0.6, sun: 3.0, ambient: 0.62, night: 1, sky: ['#2f6bb0', '#9dc4e4', '#dce9f3'], env: 1 },
-  crepuscule: { elevation: 14, turbidity: 8, exposure: 0.78, sun: 2.2, ambient: 0.34, night: 0.68, sky: ['#1b2647', '#7a5878', '#d8894f'], env: 0.75 },
-  nuit: { elevation: -14, turbidity: 6, exposure: 1.15, sun: 0.3, ambient: 0.7, night: 0.5, sky: ['#070c18', '#0f1a2e', '#20304a'], env: 1.1 },
+  jour: {
+    elevation: 44, turbidity: 4.5, exposure: 0.95, sun: 3.0, ambient: 0.62, night: 1,
+    sky: ['#2f6bb0', '#9dc4e4', '#dce9f3'], env: 1, light: '#fff6e6',
+    disc: { color: '#fff6dd', power: 1, elevation: 44 },
+  },
+  crepuscule: {
+    elevation: 14, turbidity: 8, exposure: 1.05, sun: 2.2, ambient: 0.34, night: 0.68,
+    sky: ['#1b2647', '#7a5878', '#d8894f'], env: 0.75, light: '#ffb271',
+    disc: { color: '#ffb265', power: 1.15, elevation: 11 },
+  },
+  nuit: {
+    elevation: -14, turbidity: 6, exposure: 1.45, sun: 0.3, ambient: 0.7, night: 0.5,
+    sky: ['#070c18', '#0f1a2e', '#20304a'], env: 1.1, light: '#9fb6e8',
+    // La nuit, l'astre visible est la lune : haute, froide et discrete.
+    disc: { color: '#dbe6ff', power: 0.3, elevation: 52 },
+  },
 };
 
 
@@ -91,16 +179,31 @@ export function groundOutline(model: SceneModel): THREE.Vector2[] {
   }
 }
 
-/** Aire de l'emprise, en metres carres (formule du lacet). */
-export function groundArea(model: SceneModel): number {
-  const points = groundOutline(model);
+/** Aire d'un contour ferme, en metres carres (formule du lacet). */
+export function polygonArea(points: { x: number; z: number }[]): number {
   let area = 0;
   for (let index = 0; index < points.length; index += 1) {
     const a = points[index];
     const b = points[(index + 1) % points.length];
-    area += a.x * b.y - b.x * a.y;
+    area += a.x * b.z - b.x * a.z;
   }
   return Math.abs(area) / 2;
+}
+
+/** Perimetre d'un contour ferme, en metres. */
+export function polygonPerimeter(points: { x: number; z: number }[]): number {
+  let length = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    length += Math.hypot(b.x - a.x, b.z - a.z);
+  }
+  return length;
+}
+
+/** Aire de l'emprise du terrain. */
+export function groundArea(model: SceneModel): number {
+  return polygonArea(groundOutline(model).map((point) => ({ x: point.x, z: point.y })));
 }
 
 /** Couleur renvoyee par le sol dans l'eclairage indirect. */
@@ -160,11 +263,16 @@ function beamMaterial(color: THREE.ColorRepresentation, intensity: number, haze:
   });
 }
 
+/** Cible de l'edition de contour : l'emprise du site ou une zone. */
+export type SurfaceTarget = { kind: 'site' } | { kind: 'zone'; id: string };
+
 export interface EngineHandlers {
   onSelect: (itemId: string | null) => void;
   /** Emis a la fin d'une manipulation au gizmo. */
   onTransform: (itemId: string, change: Partial<SceneItem>) => void;
   onHover: (itemId: string | null) => void;
+  /** Emis apres modification d'un contour a la souris. */
+  onSurfaceChange: (target: SurfaceTarget, points: GroundPoint[]) => void;
 }
 
 export class StudioEngine {
@@ -178,6 +286,7 @@ export class StudioEngine {
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
   private gtao: GTAOPass | null = null;
+  private grade!: ShaderPass;
   private materials: StudioMaterials = createMaterials();
 
   private content = new THREE.Group();
@@ -201,8 +310,21 @@ export class StudioEngine {
   private environmentMap: THREE.Texture | null = null;
   private environmentKey = '';
   private groundTint = 1;
+  private builtScene: string | null = null;
+  private surfaceTarget: SurfaceTarget | null = null;
+  private surfaceHandles = new THREE.Group();
+  private dragging: { index: number; insert: boolean } | null = null;
+  private workingOutline: GroundPoint[] | null = null;
+  private hoveredHandle: { index: number; insert: boolean } | null = null;
+  private outlineLine: THREE.LineLoop | null = null;
+  private surfacePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  handlers: EngineHandlers = { onSelect: () => {}, onTransform: () => {}, onHover: () => {} };
+  handlers: EngineHandlers = {
+    onSelect: () => {},
+    onTransform: () => {},
+    onHover: () => {},
+    onSurfaceChange: () => {},
+  };
 
   /** Diagnostic de la chaine de rendu, pour le support et les tests. */
   diagnostics() {
@@ -236,7 +358,12 @@ export class StudioEngine {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(host.clientWidth, host.clientHeight);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Courbe « PBR Neutral » de Khronos. ACES sature les couleurs vives et vire
+    // les hautes lumieres au blanc ; AgX, essaye ici, desature tellement les
+    // tons moyens qu'une pelouse devient grise. La courbe neutre garde la
+    // couleur exacte des materiaux dans les tons moyens et n'ecrase que les
+    // tres hautes lumieres — c'est ce que font les visualiseurs produit.
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -277,7 +404,7 @@ export class StudioEngine {
     this.sun.shadow.blurSamples = 16;
     this.scene.add(this.sun, this.sun.target, this.hemi);
     this.dimensions.visible = false;
-    this.scene.add(this.content, this.helpers, this.dimensions);
+    this.scene.add(this.content, this.helpers, this.dimensions, this.surfaceHandles);
 
     this.buildComposer('equilibre');
 
@@ -294,7 +421,7 @@ export class StudioEngine {
     const width = Math.max(1, this.host.clientWidth);
     const height = Math.max(1, this.host.clientHeight);
     this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer.addPass(new RenderPass(this.scene, this.activeCamera()));
 
     // L'occlusion ambiante en espace ecran ancre les objets au sol : c'est
     // elle qui fait la difference entre une maquette et une image credible.
@@ -325,14 +452,40 @@ export class StudioEngine {
     this.composer.addPass(new OutputPass());
     this.bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.4, 0.35, 0.95);
     this.composer.addPass(this.bloom);
-    if (quality === 'photo') this.composer.addPass(new SMAAPass());
+    // L'antialiasing du contexte WebGL ne s'applique pas au rendu differe du
+    // composer : sans SMAA, toutes les aretes du decor crenellent.
+    if (quality !== 'rapide') this.composer.addPass(new SMAAPass());
+
+    this.grade = new ShaderPass(GradeShader);
+    this.grade.uniforms.uVignette.value = quality === 'rapide' ? 0.22 : 0.3;
+    this.grade.uniforms.uAberration.value = quality === 'rapide' ? 0 : 0.0016;
+    this.composer.addPass(this.grade);
+
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality === 'photo' ? 2 : quality === 'rapide' ? 1 : 1.5));
+    this.syncRenderCamera();
+  }
+
+  /**
+   * Aligne les passes sur la camera courante.
+   *
+   * Le composer est rebati a chaque changement de qualite et a chaque
+   * reconstruction de scene ; sans ce recalage, il repart sur la camera
+   * perspective. La vue en plan restait alors active pour la selection et les
+   * poignees mais l'image affichee redevenait une perspective — le pire des
+   * cas, puisque rien ne signale l'incoherence.
+   */
+  private syncRenderCamera() {
+    const camera = this.activeCamera();
+    const pass = this.composer.passes[0] as RenderPass;
+    if (pass) pass.camera = camera;
+    if (this.gtao) this.gtao.camera = camera as THREE.PerspectiveCamera;
   }
 
   private loop = () => {
     if (this.disposed) return;
     this.frame = requestAnimationFrame(this.loop);
     const time = this.clock.getElapsedTime();
+    if (this.grade) this.grade.uniforms.uTime.value = time;
     for (const material of this.beams) {
       material.uniforms.uIntensity.value =
         (material.userData.base as number) * (0.93 + Math.sin(time * 1.7 + (material.userData.phase as number)) * 0.07);
@@ -370,9 +523,38 @@ export class StudioEngine {
 
   private onPointerDown = (event: PointerEvent) => {
     this.downAt = { x: event.clientX, y: event.clientY, time: performance.now() };
+    if (event.button !== 0 || !this.surfaceTarget) return;
+    const handle = this.pickHandle(event);
+    if (!handle) return;
+    // Une poignee saisie fige la navigation : sans cela, la vue tourne en meme
+    // temps que le sommet se deplace.
+    this.controls.enabled = false;
+    const points = this.currentOutline();
+    if (handle.insert) {
+      const a = points[handle.index];
+      const b = points[(handle.index + 1) % points.length];
+      points.splice(handle.index + 1, 0, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+      this.dragging = { index: handle.index + 1, insert: false };
+    } else {
+      this.dragging = { index: handle.index, insert: false };
+    }
+    this.workingOutline = points;
+    this.drawSurface();
   };
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this.dragging && this.workingOutline) {
+      const point = this.groundPoint(event);
+      if (!point) return;
+      this.workingOutline[this.dragging.index] = point;
+      this.drawSurface();
+      return;
+    }
+    if (this.surfaceTarget) {
+      this.hoveredHandle = this.pickHandle(event);
+      this.renderer.domElement.style.cursor = this.hoveredHandle ? 'grab' : 'crosshair';
+      return;
+    }
     const hit = this.pick(event);
     this.handlers.onHover(hit);
     this.renderer.domElement.style.cursor = hit ? 'pointer' : 'default';
@@ -381,9 +563,19 @@ export class StudioEngine {
   /** Un clic selectionne ; un glisser fait tourner la vue. */
   private onPointerUp = (event: PointerEvent) => {
     if (event.button !== 0) return;
+    if (this.dragging) {
+      this.dragging = null;
+      this.controls.enabled = true;
+      if (this.surfaceTarget && this.workingOutline) {
+        this.handlers.onSurfaceChange(this.surfaceTarget, this.workingOutline);
+        this.workingOutline = null;
+      }
+      return;
+    }
     const moved = Math.hypot(event.clientX - this.downAt.x, event.clientY - this.downAt.y);
     if (moved > 5 || performance.now() - this.downAt.time > 600) return;
     if ((this.gizmo as unknown as { dragging: boolean }).dragging) return;
+    if (this.surfaceTarget) return;
     const hit = this.pick(event);
     this.handlers.onSelect(hit);
   };
@@ -469,6 +661,125 @@ export class StudioEngine {
       change.depth = round(nominal[2] * node.scale.z);
     }
     this.handlers.onTransform(id, change);
+  }
+
+
+  /* ------------------------------------------------ edition des surfaces */
+
+  /**
+   * Entre en edition de contour. Les sommets deviennent des poignees
+   * deplacables et un point d'insertion apparait au milieu de chaque arete :
+   * c'est la maniere dont on dessine une parcelle dans un logiciel de plan.
+   */
+  setSurfaceTarget(target: SurfaceTarget | null) {
+    this.surfaceTarget = target;
+    this.gizmo.detach();
+    this.gizmo.getHelper().visible = false;
+    if (target) this.outlineOff();
+    this.refreshHandles();
+  }
+
+  getSurfaceTarget(): SurfaceTarget | null {
+    return this.surfaceTarget;
+  }
+
+  /** Contour actuellement edite, copie pour modification. */
+  private currentOutline(): GroundPoint[] {
+    if (this.workingOutline) return this.workingOutline;
+    const model = this.model;
+    if (!model || !this.surfaceTarget) return [];
+    if (this.surfaceTarget.kind === 'site') {
+      return groundOutline(model).map((point) => ({ x: point.x, z: point.y }));
+    }
+    const target = this.surfaceTarget;
+    const found = model.zones.find((entry) => entry.id === target.id);
+    return found ? found.polygon.map((point) => ({ ...point })) : [];
+  }
+
+  /** Point du sol sous le curseur, accroche a la grille. */
+  private groundPoint(event: PointerEvent): GroundPoint | null {
+    const box = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - box.left) / box.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - box.top) / box.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.activeCamera());
+    const hit = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(this.surfacePlane, hit)) return null;
+    const step = this.model?.gridSnap ?? 0;
+    const snap = (value: number) => (step > 0 ? Math.round(value / step) * step : Math.round(value * 100) / 100);
+    return { x: snap(hit.x), z: snap(hit.z) };
+  }
+
+  private pickHandle(event: PointerEvent): { index: number; insert: boolean } | null {
+    const box = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - box.left) / box.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - box.top) / box.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.activeCamera());
+    const hits = this.raycaster.intersectObjects(this.surfaceHandles.children, false);
+    const hit = hits[0]?.object;
+    if (!hit) return null;
+    return { index: hit.userData.index as number, insert: Boolean(hit.userData.insert) };
+  }
+
+  /** Supprime le sommet survole, si le contour peut se le permettre. */
+  removeHoveredVertex(): boolean {
+    const handle = this.hoveredHandle;
+    if (!this.surfaceTarget || !handle || handle.insert) return false;
+    const points = this.currentOutline();
+    if (points.length <= 3) return false;
+    points.splice(handle.index, 1);
+    this.hoveredHandle = null;
+    this.handlers.onSurfaceChange(this.surfaceTarget, points);
+    return true;
+  }
+
+  /** Redessine poignees et contour sans reconstruire la scene. */
+  private drawSurface() {
+    this.refreshHandles();
+    const points = this.currentOutline();
+    if (this.outlineLine) {
+      this.outlineLine.geometry.dispose();
+      this.outlineLine.geometry = new THREE.BufferGeometry().setFromPoints(
+        points.map((point) => new THREE.Vector3(point.x, 0.05, point.z)),
+      );
+    }
+  }
+
+  /** Redessine les poignees du contour en cours d'edition. */
+  private refreshHandles() {
+    this.surfaceHandles.clear();
+    const model = this.model;
+    if (!model || !this.surfaceTarget) return;
+
+    const points = this.currentOutline();
+    if (points.length < 3) return;
+    const radius = Math.max(0.16, Math.max(model.width, model.depth) * 0.009);
+    const vertexMaterial = new THREE.MeshBasicMaterial({ color: 0x3987e5, depthTest: false, toneMapped: false });
+    const insertMaterial = new THREE.MeshBasicMaterial({
+      color: 0xf2f5f8,
+      depthTest: false,
+      toneMapped: false,
+      transparent: true,
+      opacity: 0.65,
+    });
+    const disc = new THREE.CircleGeometry(radius, 20);
+    const small = new THREE.CircleGeometry(radius * 0.62, 16);
+
+    points.forEach((point, index) => {
+      const handle = new THREE.Mesh(disc, vertexMaterial);
+      handle.rotation.x = -Math.PI / 2;
+      handle.position.set(point.x, 0.09, point.z);
+      handle.renderOrder = 20;
+      handle.userData = { index, insert: false };
+      this.surfaceHandles.add(handle);
+
+      const next = points[(index + 1) % points.length];
+      const mid = new THREE.Mesh(small, insertMaterial);
+      mid.rotation.x = -Math.PI / 2;
+      mid.position.set((point.x + next.x) / 2, 0.085, (point.z + next.z) / 2);
+      mid.renderOrder = 20;
+      mid.userData = { index, insert: true };
+      this.surfaceHandles.add(mid);
+    });
   }
 
   /* ------------------------------------------------------------- cadrages */
@@ -577,8 +888,7 @@ export class StudioEngine {
     const camera = active ? this.planCamera : this.camera;
     this.controls.object = camera;
     this.gizmo.camera = camera;
-    (this.composer.passes[0] as RenderPass).camera = camera;
-    if (this.gtao) this.gtao.camera = camera;
+    this.syncRenderCamera();
     this.applyPlanProfile(active);
     if (active) {
       this.controls.target.set(0, 0, 0);
@@ -627,9 +937,12 @@ export class StudioEngine {
     this.bloom.strength =
       model.bloom * (model.timeOfDay === 'jour' ? 0.22 : model.timeOfDay === 'crepuscule' ? 0.6 : 1);
     this.bloom.threshold = model.timeOfDay === 'nuit' ? 0.86 : 0.95;
+    // Perspective aerienne : la brume prend la couleur de l'horizon du ciel,
+    // legerement assombrie. Le sol lointain se fond alors dans la voute au lieu
+    // de s'arreter sur une arete nette — le defaut qui trahit une maquette.
     this.scene.fog = new THREE.FogExp2(
-      new THREE.Color(model.timeOfDay === 'jour' ? 0xbcd0e4 : model.timeOfDay === 'crepuscule' ? 0x5a4a52 : 0x0a0d13),
-      0.0016 + model.haze * 0.012,
+      new THREE.Color(day.sky[2]).multiplyScalar(0.88),
+      0.0026 + model.haze * 0.012,
     );
     for (const material of this.beams) material.uniforms.uHaze.value = model.haze;
     // Equilibre soleil / ciel. Un rapport proche de 1 donne une image plate et
@@ -680,11 +993,19 @@ export class StudioEngine {
 
     for (const item of model.items) this.addItem(item, model);
 
+    this.refreshHandles();
     this.applySettings(model);
     this.setQuality(model.quality);
     this.updatePlanFrustum();
+
+    // Le point de vue n'est recadre qu'au changement de scene. La geometrie est
+    // rebatie a chaque deplacement d'objet ou de sommet : recadrer la aussi
+    // ramenerait la camera en vue de face a chaque glisser, ce qui rend toute
+    // implantation impraticable.
+    const changed = this.builtScene !== model.id;
+    this.builtScene = model.id;
     if (this.planMode) this.applyPlanProfile(true);
-    else this.setCamera('face');
+    else if (changed) this.setCamera('face');
   }
 
   /** (Re)construit un seul objet — evite de rebatir la scene a chaque reglage. */
@@ -720,13 +1041,19 @@ export class StudioEngine {
     // Fond : un degrade a luminance maitrisee. Le ciel physique de Preetham a
     // ete essaye ici ; sa dynamique, plusieurs ordres de grandeur au-dessus de
     // la scene, impose une exposition qui assombrit tout le reste de l'image.
-    this.scene.add(skyDome(day.sky[0], day.sky[1], day.sky[2], 900));
+    const disc = new THREE.Vector3().setFromSphericalCoords(
+      1,
+      THREE.MathUtils.degToRad(90 - day.disc.elevation),
+      theta,
+    );
+    this.scene.add(skyDome(day.sky[0], day.sky[1], day.sky[2], 900, disc, day.disc.color, day.disc.power));
 
     this.buildEnvironment(model, day);
 
     const span = Math.max(model.width, model.depth);
     this.sun.position.copy(position).multiplyScalar(span * 1.8);
     this.sun.target.position.set(0, 0, 0);
+    this.sun.color.set(day.light);
     this.hemi.color.set(model.timeOfDay === 'nuit' ? 0x2a3550 : 0xbdd7ff);
   }
 
@@ -741,14 +1068,22 @@ export class StudioEngine {
    * au ras du sol, comme dans les moteurs de rendu d'architecture.
    */
   private buildEnvironment(model: SceneModel, day: DayProfile) {
-    const key = `${model.timeOfDay}|${model.floorTone}`;
+    const key = `${model.timeOfDay}|${model.floorTone}|${Math.round(model.sunAzimuth / 15)}`;
     if (this.environmentKey === key && this.environmentMap) {
       this.scene.environment = this.environmentMap;
       return;
     }
 
     const envScene = new THREE.Scene();
-    envScene.add(skyDome(day.sky[0], day.sky[1], day.sky[2], 60));
+    // Le halo solaire est conserve dans l'environnement — il oriente la lumiere
+    // indirecte — mais attenue : le disque lui-meme est deja porte par la
+    // lumiere directionnelle, le compter deux fois surexposerait la scene.
+    const envSun = new THREE.Vector3().setFromSphericalCoords(
+      1,
+      THREE.MathUtils.degToRad(90 - day.disc.elevation),
+      THREE.MathUtils.degToRad(model.sunAzimuth),
+    );
+    envScene.add(skyDome(day.sky[0], day.sky[1], day.sky[2], 60, envSun, day.disc.color, day.disc.power * 0.35));
     const bounce = GROUND_BOUNCE[model.floorTone] ?? '#5a5f63';
     const floor = new THREE.Mesh(
       new THREE.SphereGeometry(58, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
@@ -773,8 +1108,8 @@ export class StudioEngine {
 
     // Un seul sol continu : une emprise plus claire que ses abords donnerait
     // l'impression d'un tapis pose sur le terrain. Le contour suffit a la lire.
-    const surroundings = groundMaterial(model.floorTone, '#ffffff', day.night);
-    const size = Math.max(model.width, model.depth) * 14 + 200;
+    const size = Math.max(model.width, model.depth) * 14 + 400;
+    const surroundings = groundMaterial(model.floorTone, '#ffffff', day.night, size);
     const around = new THREE.Mesh(new THREE.PlaneGeometry(size, size), surroundings);
     around.rotation.x = -Math.PI / 2;
     around.receiveShadow = true;
@@ -784,7 +1119,8 @@ export class StudioEngine {
     // L'emprise elle-meme, a la forme choisie.
     const points = groundOutline(model);
     const shape = new THREE.Shape(points);
-    const material = groundMaterial(model.floorTone, '#ffffff', day.night);
+    // ShapeGeometry emet des UV en coordonnees monde : une unite d'UV vaut un metre.
+    const material = groundMaterial(model.floorTone, '#ffffff', day.night, 1);
     const plot = new THREE.Mesh(new THREE.ShapeGeometry(shape, 24), material);
     plot.rotation.x = -Math.PI / 2;
     plot.position.y = 0.004;
@@ -798,13 +1134,14 @@ export class StudioEngine {
     // gaspille la resolution et bouche les contacts au sol.
     this.fitShadowCamera(model);
 
+    this.buildZones(model, day);
     this.buildDimensions(model);
 
     const outline = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point.x, 0, point.y))),
+      new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point.x, 0.05, point.y))),
       new THREE.LineBasicMaterial({ color: 0x8fb0d8, transparent: true, opacity: this.planMode ? 0.9 : 0.22 }),
     );
-    outline.position.y = 0.03;
+    this.outlineLine = outline;
     this.helpers.add(outline);
   }
 
@@ -833,6 +1170,45 @@ export class StudioEngine {
     this.dimensions.add(
       textSprite(`${Math.round(groundArea(model))} m²`, new THREE.Vector3(half.w - scale * 1.4, 0.1, half.d + margin), scale * 0.8),
     );
+  }
+
+  /**
+   * Surfaces dessinees a l'interieur du terrain.
+   * Une zone posee au sol est une simple decoupe ; des qu'elle a une hauteur,
+   * elle est extrudee et prend une joue laterale, comme un plancher monte.
+   */
+  private buildZones(model: SceneModel, day: DayProfile) {
+    for (const zone of model.zones) {
+      if (!zone.visible || zone.polygon.length < 3) continue;
+      const shape = new THREE.Shape(zone.polygon.map((point) => new THREE.Vector2(point.x, point.z)));
+      const material = groundMaterial(zone.ground, '#ffffff', day.night, 1);
+
+      if (zone.elevation > 0.01) {
+        const geometry = new THREE.ExtrudeGeometry(shape, { depth: zone.elevation, bevelEnabled: false });
+        geometry.rotateX(-Math.PI / 2);
+        geometry.translate(0, zone.elevation, 0);
+        const solid = new THREE.Mesh(geometry, material);
+        solid.castShadow = true;
+        solid.receiveShadow = true;
+        solid.userData.decor = true;
+        this.scene.add(solid);
+      } else {
+        const flat = new THREE.Mesh(new THREE.ShapeGeometry(shape, 20), material);
+        flat.rotation.x = -Math.PI / 2;
+        flat.position.y = 0.012;
+        flat.receiveShadow = true;
+        flat.userData.decor = true;
+        this.scene.add(flat);
+      }
+
+      const border = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(
+          zone.polygon.map((point) => new THREE.Vector3(point.x, zone.elevation + 0.02, point.z)),
+        ),
+        new THREE.LineBasicMaterial({ color: 0xc8d6e6, transparent: true, opacity: this.planMode ? 0.7 : 0.18 }),
+      );
+      this.helpers.add(border);
+    }
   }
 
   /** Cadre l'ombre portee sur l'emprise du site, marge comprise. */
@@ -930,9 +1306,11 @@ export class StudioEngine {
       scale.set(size, size, size);
       matrix.compose(position, quaternion, scale);
       mesh.setMatrixAt(index, matrix);
-      // Palette de vetements : des gris et des teintes sourdes, jamais du blanc.
-      const tone = 0.16 + Math.random() * 0.3;
-      color.setHSL(Math.random(), 0.1 + Math.random() * 0.25, tone);
+      // Palette de vetements reelle plutot qu'une teinte aleatoire : une teinte
+      // tiree au hasard sur tout le cercle chromatique donne une foule mauve et
+      // turquoise qu'on ne voit sur aucun terrain.
+      color.set(CROWD_PALETTE[Math.floor(Math.random() * CROWD_PALETTE.length)]);
+      color.multiplyScalar(0.86 + Math.random() * 0.28);
       mesh.setColorAt(index, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
@@ -1004,14 +1382,28 @@ function textSprite(text: string, position: THREE.Vector3, scale: number): THREE
 /**
  * Voute de fond a trois arrets : zenith, ciel median, horizon.
  * Un degrade a deux couleurs donne un ciel plat ; c'est la bande claire pres
- * de l'horizon qui cree la profondeur et pose la ligne de sol.
+ * de l'horizon qui cree la profondeur et pose la ligne de sol. Le disque
+ * solaire et son halo sont dessines dans le meme shader : sans eux, une image
+ * exterieure n'a pas de source visible et le regard ne sait pas d'ou vient
+ * la lumiere.
  */
-export function skyDome(zenith: string, middle: string, horizon: string, radius: number): THREE.Mesh {
+export function skyDome(
+  zenith: string,
+  middle: string,
+  horizon: string,
+  radius: number,
+  sun?: THREE.Vector3,
+  sunColor = '#fff3d8',
+  sunPower = 1,
+): THREE.Mesh {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uZenith: { value: new THREE.Color(zenith) },
       uMiddle: { value: new THREE.Color(middle) },
       uHorizon: { value: new THREE.Color(horizon) },
+      uSun: { value: sun ? sun.clone().normalize() : new THREE.Vector3(0, 1, 0) },
+      uSunColor: { value: new THREE.Color(sunColor) },
+      uSunPower: { value: sun ? sunPower : 0 },
     },
     vertexShader: `
       varying vec3 vPosition;
@@ -1024,9 +1416,13 @@ export function skyDome(zenith: string, middle: string, horizon: string, radius:
       uniform vec3 uZenith;
       uniform vec3 uMiddle;
       uniform vec3 uHorizon;
+      uniform vec3 uSun;
+      uniform vec3 uSunColor;
+      uniform float uSunPower;
       varying vec3 vPosition;
       void main() {
-        float h = normalize(vPosition).y;
+        vec3 dir = normalize(vPosition);
+        float h = dir.y;
         // Sous l'horizon, le ciel s'assombrit : le sol ne se decoupe plus sur
         // une bande claire quand la camera plonge.
         vec3 color = h < 0.0
@@ -1034,6 +1430,21 @@ export function skyDome(zenith: string, middle: string, horizon: string, radius:
           : (h < 0.28
               ? mix(uHorizon, uMiddle, smoothstep(0.0, 0.28, h))
               : mix(uMiddle, uZenith, smoothstep(0.28, 0.9, h)));
+
+        if (uSunPower > 0.0) {
+          float cosA = clamp(dot(dir, uSun), -1.0, 1.0);
+          // Diffusion de Mie : le halo large qui blanchit le ciel autour du
+          // soleil, puis le disque lui-meme, net et sature.
+          float halo = pow(max(cosA, 0.0), 220.0) * 0.55 + pow(max(cosA, 0.0), 12.0) * 0.16;
+          float disc = smoothstep(0.99955, 0.99975, cosA);
+          color += uSunColor * halo * uSunPower;
+          color = mix(color, uSunColor * 2.4, disc * clamp(uSunPower, 0.0, 1.0));
+        }
+
+        // Brume d'horizon : l'air epaissit la derniere bande avant le sol.
+        float haze = pow(1.0 - clamp(abs(h) * 5.5, 0.0, 1.0), 2.0);
+        color = mix(color, uHorizon * 1.06, haze * 0.35);
+
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -1042,7 +1453,7 @@ export function skyDome(zenith: string, middle: string, horizon: string, radius:
     fog: false,
     toneMapped: false,
   });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 32), material);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 40), material);
   dome.name = 'sky';
   dome.userData.decor = true;
   return dome;

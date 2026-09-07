@@ -70,6 +70,12 @@ export function migrate(db: Partial<Database>): Database {
     ...scene,
     groundShape: scene.groundShape ?? 'rectangle',
     polygon: scene.polygon?.length ? scene.polygon : defaultPolygon(scene.width ?? 20, scene.depth ?? 16),
+    zones: (scene.zones ?? []).map((zone) => ({
+      ...zone,
+      elevation: zone.elevation ?? 0,
+      visible: zone.visible ?? true,
+      polygon: zone.polygon ?? [],
+    })),
     gridSnap: scene.gridSnap ?? 0.25,
     showGrid: scene.showGrid ?? true,
     quality: scene.quality ?? 'equilibre',

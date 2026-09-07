@@ -434,6 +434,21 @@ export interface GroundPoint {
   z: number;
 }
 
+/**
+ * Surface dessinee a l'interieur du terrain : plancher, piste, allee gravier,
+ * zone bar. Chaque zone a son contour libre, sa nature de sol et sa hauteur.
+ */
+export interface SurfaceZone {
+  id: string;
+  label: string;
+  /** Nature de sol, parmi celles du terrain. */
+  ground: string;
+  polygon: GroundPoint[];
+  /** Hauteur du plancher au-dessus du terrain, en metres. */
+  elevation: number;
+  visible: boolean;
+}
+
 export interface SceneItem {
   id: string;
   productId: string | null;
@@ -481,6 +496,8 @@ export interface Scene {
   groundShape: GroundShape;
   /** Sommets de l'emprise, en metres, pour la forme « polygone ». */
   polygon: GroundPoint[];
+  /** Surfaces dessinees a l'interieur du terrain. */
+  zones: SurfaceZone[];
   /** Pas d'accrochage de la grille, en metres. 0 = accrochage desactive. */
   gridSnap: number;
   showGrid: boolean;

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../core/store';
 import { useNav } from '../../core/nav';
-import { StudioEngine, groundArea, type CameraPreset, type TransformMode } from './engine';
+import { StudioEngine, groundArea, polygonArea, type CameraPreset, type SurfaceTarget, type TransformMode } from './engine';
 import { GROUND_KINDS, OBJECT_LIBRARY, billableUnits, itemSize, objectDef, productIdForRef } from './library';
-import type { EntityId, GroundShape, Scene, SceneItem, VenueType } from '../../core/types';
+import type { EntityId, GroundPoint, GroundShape, Scene, SceneItem, SurfaceZone, VenueType } from '../../core/types';
 import { addDays, downloadFile, esc, money, money0, num, sum, today, uid } from '../../core/utils';
 import { Badge, Card, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Segmented } from '../../ui/kit';
 import { CategorySelect, ManageCategoriesButton } from '../../ui/CategoryManager';
@@ -33,6 +33,49 @@ const MODES: { id: TransformMode; label: string; key: string }[] = [
   { id: 'scale', label: 'Dimensionner', key: 'T' },
 ];
 
+/** Contour effectif d'une scene, quel que soit le preset de forme. */
+function outlineOf(scene: Scene): GroundPoint[] {
+  const hw = scene.width / 2;
+  const hd = scene.depth / 2;
+  switch (scene.groundShape) {
+    case 'polygone':
+      return scene.polygon.length >= 3
+        ? scene.polygon
+        : [
+            { x: -hw, z: -hd },
+            { x: hw, z: -hd },
+            { x: hw, z: hd },
+            { x: -hw, z: hd },
+          ];
+    case 'l':
+      return [
+        { x: -hw, z: -hd },
+        { x: hw, z: -hd },
+        { x: hw, z: 0 },
+        { x: 0, z: 0 },
+        { x: 0, z: hd },
+        { x: -hw, z: hd },
+      ];
+    case 'cercle':
+    case 'ovale': {
+      const radius = scene.groundShape === 'cercle' ? Math.min(hw, hd) : 1;
+      return Array.from({ length: 24 }, (_, index) => {
+        const angle = (index / 24) * Math.PI * 2;
+        return scene.groundShape === 'cercle'
+          ? { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius }
+          : { x: Math.cos(angle) * hw, z: Math.sin(angle) * hd };
+      });
+    }
+    default:
+      return [
+        { x: -hw, z: -hd },
+        { x: hw, z: -hd },
+        { x: hw, z: hd },
+        { x: -hw, z: hd },
+      ];
+  }
+}
+
 function emptyScene(entity: EntityId): Scene {
   return {
     id: uid('scn'),
@@ -59,6 +102,7 @@ function emptyScene(entity: EntityId): Scene {
       { x: 15, z: 12 },
       { x: -15, z: 12 },
     ],
+    zones: [],
     gridSnap: 0.25,
     showGrid: true,
     quality: 'equilibre',
@@ -82,6 +126,7 @@ export default function Studio() {
   const [panel, setPanel] = useState<'objets' | 'terrain' | 'chiffrage'>('objets');
   const [mode, setMode] = useState<TransformMode>('translate');
   const [planMode, setPlanMode] = useState(false);
+  const [surfaceTarget, setSurfaceTarget] = useState<SurfaceTarget | null>(null);
   const [history, setHistory] = useState<{ past: Scene[]; future: Scene[] }>({ past: [], future: [] });
 
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -162,6 +207,17 @@ export default function Studio() {
       onSelect: (itemId) => setSelected(itemId),
       onTransform: (itemId, change) => patchItem(itemId, change),
       onHover: () => {},
+      onSurfaceChange: (target, points) => {
+        if (target.kind === 'site') {
+          patch({ groundShape: 'polygone', polygon: points }, false);
+        } else {
+          update((draft) => {
+            const scene2 = draft.scenes.find((entry) => entry.id === sceneRef.current?.id);
+            const zone = scene2?.zones.find((entry) => entry.id === target.id);
+            if (zone) zone.polygon = points;
+          });
+        }
+      },
     };
     // Point d'accroche de diagnostic : utilise par les tests de rendu et le
     // support pour verifier la chaine (ombres, passes, eclairage) en situation.
@@ -172,7 +228,7 @@ export default function Studio() {
       engineRef.current = null;
       setReady(false);
     };
-  }, [patchItem]);
+  }, [patchItem, patch, update]);
 
   /** Cle de reconstruction : tout ce qui change la geometrie de la scene. */
   const sceneKey = scene
@@ -188,6 +244,11 @@ export default function Studio() {
         scene.wallTone,
         scene.sunAzimuth,
         scene.quality,
+        scene.groundShape,
+        scene.polygon.map((point) => `${point.x},${point.z}`).join(';'),
+        scene.zones
+          .map((zone) => `${zone.id}:${zone.ground}:${zone.elevation}:${zone.visible}:${zone.polygon.map((p) => `${p.x},${p.z}`).join('|')}`)
+          .join('~'),
         scene.items
           .map((item) =>
             [item.id, item.model3d, item.x, item.y, item.z, item.rotX, item.rotY, item.scale, item.width, item.height, item.depth, item.color, item.beam, item.qty, item.locked].join(','),
@@ -212,6 +273,23 @@ export default function Studio() {
     engineRef.current?.setTransformMode(mode);
   }, [mode]);
 
+  useEffect(() => {
+    engineRef.current?.setSurfaceTarget(surfaceTarget);
+  }, [surfaceTarget, sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Editer un contour se fait en vue en plan : on y bascule automatiquement. */
+  const editSurface = useCallback(
+    (target: SurfaceTarget | null) => {
+      setSurfaceTarget(target);
+      setSelected(null);
+      if (target && !engineRef.current?.isPlanMode()) {
+        engineRef.current?.setPlanMode(true);
+        setPlanMode(true);
+      }
+    },
+    [],
+  );
+
   /* ------------------------------------------------------- raccourcis clavier */
 
   useEffect(() => {
@@ -234,6 +312,11 @@ export default function Studio() {
         engineRef.current?.setPlanMode(next);
         setPlanMode(next);
       }
+      if ((key === 'delete' || key === 'backspace') && engineRef.current?.removeHoveredVertex()) return;
+      if (key === 'escape' && surfaceTarget) {
+        setSurfaceTarget(null);
+        return;
+      }
       if ((key === 'delete' || key === 'backspace') && selected) {
         pushHistory();
         update((draft) => {
@@ -246,7 +329,7 @@ export default function Studio() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected, undo, redo, patch, pushHistory, update]);
+  }, [selected, surfaceTarget, undo, redo, patch, pushHistory, update]);
 
   /* ----------------------------------------------------------- chiffrage */
 
@@ -481,6 +564,7 @@ export default function Studio() {
     toast(`${count} objet(s) ajouté(s).`, 'succes');
   };
 
+  const siteEditing = surfaceTarget?.kind === 'site';
   const selectedItem = scene?.items.find((item) => item.id === selected) ?? null;
   const selectedDef = selectedItem ? objectDef(selectedItem.model3d) : null;
   const selectedSize = selectedItem ? itemSize(selectedItem.model3d, selectedItem) : null;
@@ -703,70 +787,82 @@ export default function Studio() {
                   <Field label="Forme de l’emprise" hint="Un terrain réel est rarement un rectangle parfait">
                     <select
                       value={scene.groundShape}
-                      onChange={(event) => patch({ groundShape: event.target.value as GroundShape })}
+                      onChange={(event) => {
+                        const shape = event.target.value as GroundShape;
+                        // Passer en polygone fige la forme courante en sommets
+                        // editables : on part d'un preset et on le deforme.
+                        if (shape === 'polygone') {
+                          patch({
+                            groundShape: 'polygone',
+                            polygon: outlineOf(scene).map((point) => ({
+                              x: Math.round(point.x * 100) / 100,
+                              z: Math.round(point.z * 100) / 100,
+                            })),
+                          });
+                        } else {
+                          patch({ groundShape: shape });
+                        }
+                      }}
                     >
                       <option value="rectangle">Rectangle</option>
                       <option value="l">Forme en L</option>
                       <option value="cercle">Cercle</option>
                       <option value="ovale">Ovale</option>
-                      <option value="polygone">Polygone libre</option>
+                      <option value="polygone">Contour libre</option>
                     </select>
                   </Field>
-                  {scene.groundShape === 'polygone' ? (
-                    <Field label="Sommets de l’emprise" hint="Coordonnées en mètres, dans l’ordre du contour">
-                      <div className="stack-sm">
-                        {scene.polygon.map((point, index) => (
-                          <div key={index} className="row" style={{ gap: 5 }}>
-                            <span className="small dim" style={{ width: 18 }}>
-                              {index + 1}
-                            </span>
-                            <input
-                              type="number"
-                              step={0.5}
-                              value={point.x}
-                              onChange={(event) =>
-                                patch({
-                                  polygon: scene.polygon.map((entry, i) =>
-                                    i === index ? { ...entry, x: Number(event.target.value) } : entry,
-                                  ),
-                                })
-                              }
-                            />
-                            <input
-                              type="number"
-                              step={0.5}
-                              value={point.z}
-                              onChange={(event) =>
-                                patch({
-                                  polygon: scene.polygon.map((entry, i) =>
-                                    i === index ? { ...entry, z: Number(event.target.value) } : entry,
-                                  ),
-                                })
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              disabled={scene.polygon.length <= 3}
-                              onClick={() => patch({ polygon: scene.polygon.filter((_, i) => i !== index) })}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() => {
-                            const last = scene.polygon[scene.polygon.length - 1] ?? { x: 0, z: 0 };
-                            patch({ polygon: [...scene.polygon, { x: last.x + 2, z: last.z }] });
-                          }}
-                        >
-                          + Sommet
-                        </button>
-                      </div>
-                    </Field>
+
+                  <div className="row" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      className={siteEditing ? 'btn btn-primary' : 'btn'}
+                      style={{ flex: 1 }}
+                      onClick={() => {
+                        if (siteEditing) {
+                          editSurface(null);
+                          return;
+                        }
+                        if (scene.groundShape !== 'polygone') {
+                          patch({
+                            groundShape: 'polygone',
+                            polygon: outlineOf(scene).map((point) => ({
+                              x: Math.round(point.x * 100) / 100,
+                              z: Math.round(point.z * 100) / 100,
+                            })),
+                          });
+                        }
+                        editSurface({ kind: 'site' });
+                      }}
+                    >
+                      {siteEditing ? '✓ Terminer le tracé' : '✎ Dessiner le contour'}
+                    </button>
+                    {scene.groundShape === 'polygone' ? (
+                      <button
+                        type="button"
+                        className="btn"
+                        title="Repartir d’un rectangle aux dimensions saisies"
+                        onClick={() =>
+                          patch({
+                            polygon: [
+                              { x: -scene.width / 2, z: -scene.depth / 2 },
+                              { x: scene.width / 2, z: -scene.depth / 2 },
+                              { x: scene.width / 2, z: scene.depth / 2 },
+                              { x: -scene.width / 2, z: scene.depth / 2 },
+                            ],
+                          })
+                        }
+                      >
+                        ⟲
+                      </button>
+                    ) : null}
+                  </div>
+                  {siteEditing ? (
+                    <div className="small muted">
+                      Glissez un point bleu pour le déplacer, un point clair pour ajouter un sommet,
+                      <strong> Suppr</strong> sur un point pour le retirer. L’accrochage suit le pas de la grille.
+                    </div>
                   ) : null}
+
                   <div className="grid g3" style={{ gap: 8 }}>
                     <Field label="Largeur (m)">
                       <input type="number" min={4} max={200} step={0.5} value={scene.width} onChange={(event) => patch({ width: Number(event.target.value) })} />
@@ -783,6 +879,148 @@ export default function Studio() {
                     {' '}
                     {num(load.seats)} places assises
                   </div>
+                  <hr className="hr" />
+                  <div className="row">
+                    <h3>Surfaces</h3>
+                    <span className="spacer" />
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => {
+                        const zone: SurfaceZone = {
+                          id: uid('zone'),
+                          label: `Surface ${scene.zones.length + 1}`,
+                          ground: 'parquet',
+                          elevation: 0,
+                          visible: true,
+                          polygon: [
+                            { x: -4, z: -3 },
+                            { x: 4, z: -3 },
+                            { x: 4, z: 3 },
+                            { x: -4, z: 3 },
+                          ],
+                        };
+                        patch({ zones: [...scene.zones, zone] });
+                        editSurface({ kind: 'zone', id: zone.id });
+                      }}
+                    >
+                      + Surface
+                    </button>
+                  </div>
+                  <div className="small dim">
+                    Plancher, piste de danse, allée gravier, zone bar : chaque surface a son contour libre, sa
+                    nature de sol et sa hauteur.
+                  </div>
+                  <div className="stack-sm">
+                    {scene.zones.map((zone) => {
+                      const editing = surfaceTarget?.kind === 'zone' && surfaceTarget.id === zone.id;
+                      return (
+                        <div
+                          key={zone.id}
+                          className="card"
+                          style={{
+                            background: 'var(--surface-2)',
+                            padding: 10,
+                            borderColor: editing ? 'var(--accent)' : undefined,
+                          }}
+                        >
+                          <div className="row" style={{ gap: 6 }}>
+                            <input
+                              value={zone.label}
+                              onChange={(event) =>
+                                patch(
+                                  {
+                                    zones: scene.zones.map((entry) =>
+                                      entry.id === zone.id ? { ...entry, label: event.target.value } : entry,
+                                    ),
+                                  },
+                                  false,
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              title={zone.visible ? 'Masquer' : 'Afficher'}
+                              onClick={() =>
+                                patch({
+                                  zones: scene.zones.map((entry) =>
+                                    entry.id === zone.id ? { ...entry, visible: !entry.visible } : entry,
+                                  ),
+                                })
+                              }
+                            >
+                              {zone.visible ? '👁' : '🚫'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger"
+                              onClick={() => {
+                                if (editing) editSurface(null);
+                                patch({ zones: scene.zones.filter((entry) => entry.id !== zone.id) });
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="grid g2" style={{ gap: 6, marginTop: 8 }}>
+                            <Field label="Sol">
+                              <select
+                                value={zone.ground}
+                                onChange={(event) =>
+                                  patch({
+                                    zones: scene.zones.map((entry) =>
+                                      entry.id === zone.id ? { ...entry, ground: event.target.value } : entry,
+                                    ),
+                                  })
+                                }
+                              >
+                                {GROUND_KINDS.map((ground) => (
+                                  <option key={ground.id} value={ground.id}>
+                                    {ground.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                            <Field label="Hauteur (m)">
+                              <input
+                                type="number"
+                                min={0}
+                                max={2}
+                                step={0.05}
+                                value={zone.elevation}
+                                onChange={(event) =>
+                                  patch({
+                                    zones: scene.zones.map((entry) =>
+                                      entry.id === zone.id
+                                        ? { ...entry, elevation: Number(event.target.value) }
+                                        : entry,
+                                    ),
+                                  })
+                                }
+                              />
+                            </Field>
+                          </div>
+                          <div className="row small muted" style={{ marginTop: 8 }}>
+                            <span>
+                              {num(polygonArea(zone.polygon))} m² · {zone.polygon.length} sommets
+                            </span>
+                            <span className="spacer" />
+                            <button
+                              type="button"
+                              className={editing ? 'btn btn-sm btn-primary' : 'btn btn-sm'}
+                              onClick={() => editSurface(editing ? null : { kind: 'zone', id: zone.id })}
+                            >
+                              {editing ? '✓ Terminer' : '✎ Dessiner'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!scene.zones.length ? <span className="small dim">Aucune surface dessinée.</span> : null}
+                  </div>
+
+                  <hr className="hr" />
                   <Field label={`Jauge : ${num(scene.audience)} personnes`}>
                     <input type="range" min={0} max={5000} step={25} value={scene.audience} onChange={(event) => patch({ audience: Number(event.target.value) }, false)} />
                   </Field>
@@ -1067,7 +1305,7 @@ export default function Studio() {
                               <td>
                                 <div style={{ fontSize: 12.5 }}>{line.designation}</div>
                                 <div className="small dim">{line.description}</div>
-                                {product?.unit ? <div className="small dim">Facturé au {product.unit}</div> : null}
+                                {product?.unit ? <div className="small dim">Unité de facturation : {product.unit}</div> : null}
                               </td>
                               <td className="num tnum">{num(line.qty)}</td>
                               <td className="num tnum">{money(line.unitPrice)}</td>

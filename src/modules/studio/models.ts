@@ -84,6 +84,158 @@ function roundedBox(w: number, h: number, d: number, radius = 0.02): THREE.Buffe
   });
 }
 
+/* ------------------------------------------------------------ vegetation */
+
+/** Graine stable deduite de l'identifiant : deux arbres differents, mais le
+ * meme arbre d'une session a l'autre. */
+function hashCode(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** Generateur pseudo-aleatoire deterministe (xorshift 32 bits). */
+function rng(seed: number): () => number {
+  let state = seed || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state / 4294967296;
+  };
+}
+
+/**
+ * Tronc en tronc de cone segmente, legerement incline, avec quelques charpentieres.
+ * Un cylindre droit se lit comme un poteau ; ce sont l'evasement du pied et
+ * la montee des branches qui donnent l'echelle d'un arbre.
+ */
+function trunkGeometry(w: number, h: number, seed: number): THREE.BufferGeometry {
+  const random = rng(seed);
+  const parts: THREE.BufferGeometry[] = [];
+  const trunkHeight = h * 0.52;
+  const radius = Math.max(0.05, w * 0.055);
+
+  const sections = 5;
+  let x = 0;
+  let z = 0;
+  const leanX = (random() - 0.5) * w * 0.06;
+  const leanZ = (random() - 0.5) * w * 0.06;
+  for (let index = 0; index < sections; index += 1) {
+    const t0 = index / sections;
+    const t1 = (index + 1) / sections;
+    const r0 = radius * (1.55 - t0 * 0.75);
+    const r1 = radius * (1.55 - t1 * 0.75);
+    const segment = new THREE.CylinderGeometry(r1, r0, (trunkHeight / sections) * 1.02, 9);
+    segment.translate(x, trunkHeight * ((t0 + t1) / 2), z);
+    parts.push(segment);
+    x += leanX / sections;
+    z += leanZ / sections;
+  }
+
+  // Empattement : le pied s'evase pour rejoindre le sol.
+  const flare = new THREE.CylinderGeometry(radius * 1.5, radius * 2.4, h * 0.05, 9);
+  flare.translate(0, h * 0.025, 0);
+  parts.push(flare);
+
+  for (let branch = 0; branch < 4; branch += 1) {
+    const angle = (branch / 4) * Math.PI * 2 + random() * 0.7;
+    const length = h * (0.16 + random() * 0.12);
+    const limb = new THREE.CylinderGeometry(radius * 0.28, radius * 0.55, length, 7);
+    limb.translate(0, length / 2, 0);
+    limb.rotateZ(0.75 + random() * 0.3);
+    limb.rotateY(angle);
+    limb.translate(x, trunkHeight * (0.72 + random() * 0.2), z);
+    parts.push(limb);
+  }
+
+  return mergeGeometries(parts, false) ?? new THREE.CylinderGeometry(radius, radius * 1.4, trunkHeight, 9);
+}
+
+/**
+ * Couronne composee d'une quinzaine de masses irregulieres.
+ *
+ * Quatre spheres lisses donnent un nuage de dessin anime. Un feuillage se lit
+ * a sa silhouette decoupee et a l'assombrissement de son dessous : la couleur
+ * est donc portee par les sommets, du vert clair au sommet expose au vert
+ * profond sous la masse.
+ */
+function crownGeometry(w: number, h: number, d: number, seed: number): THREE.BufferGeometry {
+  const random = rng(seed ^ 0x9e3779b9);
+  const parts: THREE.BufferGeometry[] = [];
+  const rx = w * 0.5;
+  const rz = d * 0.5;
+  const base = h * 0.5;
+  const crownHeight = h * 0.5;
+
+  for (let index = 0; index < 15; index += 1) {
+    const u = random() * Math.PI * 2;
+    const spread = Math.sqrt(random());
+    const lift = random();
+    const size = (Math.min(rx, rz) * (0.5 - spread * 0.22)) * (0.85 + random() * 0.4);
+    const blob = new THREE.IcosahedronGeometry(size, 1);
+
+    // Deformation des sommets : aucune masse de feuillage n'est spherique.
+    const position = blob.getAttribute('position');
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      const jitter = 0.82 + random() * 0.36;
+      position.setXYZ(
+        vertex,
+        position.getX(vertex) * jitter,
+        position.getY(vertex) * jitter * 0.86,
+        position.getZ(vertex) * jitter,
+      );
+    }
+    position.needsUpdate = true;
+    blob.computeVertexNormals();
+
+    blob.translate(
+      Math.cos(u) * spread * (rx - size * 0.6),
+      base + crownHeight * (0.22 + lift * 0.62),
+      Math.sin(u) * spread * (rz - size * 0.6),
+    );
+    parts.push(blob);
+  }
+
+  const crown = mergeGeometries(parts, false) ?? new THREE.IcosahedronGeometry(rx * 0.6, 1);
+  const position = crown.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  const top = new THREE.Color('#6d9740');
+  const bottom = new THREE.Color('#1f3313');
+  const shade = new THREE.Color();
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    const y = position.getY(vertex);
+    const ratio = THREE.MathUtils.clamp((y - base) / Math.max(0.001, crownHeight), 0, 1);
+    shade.copy(bottom).lerp(top, Math.pow(ratio, 0.8));
+    // Panachage : quelques masses plus claires que leurs voisines.
+    const speckle = 0.88 + ((vertex * 2654435761) % 1000) / 1000 * 0.24;
+    colors[vertex * 3] = shade.r * speckle;
+    colors[vertex * 3 + 1] = shade.g * speckle;
+    colors[vertex * 3 + 2] = shade.b * speckle;
+  }
+  crown.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return crown;
+}
+
+let FOLIAGE: THREE.MeshStandardMaterial | null = null;
+
+/** Materiau de couronne : couleur portee par les sommets, facettes marquees. */
+function foliageMaterial(): THREE.MeshStandardMaterial {
+  if (!FOLIAGE) {
+    FOLIAGE = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.95,
+      metalness: 0,
+      flatShading: true,
+    });
+  }
+  return FOLIAGE;
+}
+
 /** Cylindre vertical simple, utilise pour les pieds et les mats. */
 function post(radius: number, height: number): THREE.BufferGeometry {
   return cyl(radius, height, 10);
@@ -986,16 +1138,9 @@ export function buildObject(
     }
     case 'arbre': {
       parametric = true;
-      group.add(solid(new THREE.CylinderGeometry(w * 0.06, w * 0.1, h * 0.45, 10), m.tronc, 0, h * 0.225));
-      for (const [dx, dy, dz, scale] of [
-        [0, 0.72, 0, 1],
-        [0.22, 0.6, 0.12, 0.72],
-        [-0.24, 0.62, -0.1, 0.66],
-        [0.05, 0.86, -0.18, 0.6],
-      ] as [number, number, number, number][]) {
-        const blob = solid(new THREE.IcosahedronGeometry((w / 2) * 0.62 * scale, 1), m.feuillage, dx * w, dy * h, dz * d);
-        group.add(blob);
-      }
+      const seed = hashCode(item.id);
+      group.add(solid(trunkGeometry(w, h, seed), m.tronc));
+      group.add(solid(crownGeometry(w, h, d, seed), foliageMaterial()));
       break;
     }
     case 'haie': {

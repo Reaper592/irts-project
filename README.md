@@ -108,8 +108,39 @@ nature de l'objet : un bar au mètre de comptoir, un mur LED à la dalle, une
 piste de danse au mètre carré, une guirlande à la longueur, un bloc de sièges à
 la place.
 
+### Dessiner le terrain
+
+L'emprise n'est pas limitée à un rectangle. Un préréglage donne le point de
+départ — rectangle, forme en L, cercle, ovale — puis **✎ Dessiner le contour**
+bascule en vue en plan et affiche les poignées : un point bleu par sommet, un
+point clair au milieu de chaque segment.
+
+- glisser un point bleu déplace le sommet ;
+- glisser un point clair insère un nouveau sommet à cet endroit ;
+- `Suppr` sur un point survolé le retire (le contour garde au moins 3 sommets).
+
+L'accrochage suit le pas de la grille et la surface se recalcule en direct.
+
+Sous le contour du site, la section **Surfaces** ajoute autant de zones que
+nécessaire — plancher, piste de danse, allée gravier, terrasse — chacune avec
+son propre contour libre, sa nature de sol et sa hauteur. Une zone surélevée est
+extrudée et porte ses ombres ; une zone masquée reste dans la scène sans être
+rendue.
+
 Raccourcis : `D` déplacer · `R` tourner · `T` dimensionner · `P` vue en plan ·
 `G` grille · `Suppr` supprimer · `Ctrl+Z` annuler.
+
+### Chaîne de rendu
+
+Rendu direct puis occlusion ambiante en espace écran (GTAO), sortie tonemappée,
+halo, antialiasing SMAA et étalonnage final — vignettage, aberration
+chromatique et grain. La courbe de tone mapping est la courbe neutre PBR de
+Khronos, qui garde la couleur exacte des matériaux dans les tons moyens là où
+ACES sature et où AgX délave. L'éclairage indirect est capturé depuis le ciel
+de la scène et le rebond du sol, jamais depuis un environnement de studio : une
+irradiance d'intérieur débouche les ombres au point de les faire disparaître en
+extérieur. Le brouillard prend la couleur de l'horizon, ce qui fond le sol
+lointain dans la voûte au lieu de l'arrêter sur une arête.
 
 Le moteur expose `window.irtsStudio.diagnostics()` : état des ombres, des
 passes de rendu et de l'éclairage, pour le support et les tests de rendu.
