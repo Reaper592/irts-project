@@ -693,6 +693,17 @@ export default function Studio() {
     [selection, pushHistory, update],
   );
 
+  /** Repose la selection sur le terrain et ecrit les hauteurs corrigees. */
+  const dropSelectionToGround = useCallback(() => {
+    const changes = engineRef.current?.dropToGround(selection) ?? [];
+    if (!changes.length) {
+      toast('Tout est déjà posé au sol.', 'info');
+      return;
+    }
+    patchItems(changes);
+    toast(`${changes.length} objet(s) reposé(s) au sol.`, 'succes');
+  }, [selection, patchItems, toast]);
+
   /** Longueur cumulee de la chaine de mesure en cours. */
   const measureTotal = useMemo(() => {
     let total = 0;
@@ -1421,6 +1432,9 @@ export default function Studio() {
                         </button>
                         <button type="button" className="btn btn-sm" onClick={() => duplicateSelection()}>
                           Dupliquer
+                        </button>
+                        <button type="button" className="btn btn-sm" onClick={dropSelectionToGround}>
+                          ⤓ Poser au sol
                         </button>
                         <button
                           type="button"

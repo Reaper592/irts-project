@@ -170,9 +170,21 @@ lointain dans la voûte au lieu de l'arrêter sur une arête.
 Le moteur expose deux relevés pour le support et les tests de non-régression :
 `window.irtsStudio.diagnostics()` donne l'état des ombres, des passes de rendu
 et de l'éclairage ; `window.irtsStudio.contactReport()` donne, pour chaque
-objet posé, la hauteur du bas de sa boîte englobante. Un objet posé au sol doit
-y lire zéro — seuls les objets accrochés (guirlandes, ponts, lyres) descendent
-sous leur point d'accroche.
+objet posé, la hauteur du bas de sa boîte englobante ainsi que les cotes
+réellement occupées face aux cotes annoncées au devis.
+
+Deux règles s'y vérifient. Un objet posé au sol lit zéro — seuls les objets
+accrochés (guirlandes, fanions, ponts, lyres) descendent sous leur point
+d'accroche. Et les cotes occupées valent les cotes annoncées : c'est
+indispensable pour les objets non paramétriques, dont le redimensionnement
+divise par la cote nominale — une maille qui ne la respecte pas fait mentir le
+devis *et* l'outil « Dimensionner ». Seuls dépassent les éléments qui sortent
+réellement de l'enveloppe du produit : la flamme d'un brasero, le trépied
+déployé d'un pied d'enceinte, la flèche d'un pied de micro, l'affaissement
+d'une guirlande, les haubans et ancrages d'une tente stretch.
+
+Le gizmo repose automatiquement un objet dont la maille passerait sous le
+terrain, et le bouton **⤓ Poser au sol** rattrape une hauteur saisie à la main.
 
 ## Structure
 

@@ -353,19 +353,33 @@ export class StudioEngine {
    * quelques centimetres se voit immediatement, et aucune cote n'est alors
    * fiable. Ce releve sert au support et aux tests de non-regression.
    */
-  contactReport(): { id: string; model: string; y: number; bottom: number }[] {
+  contactReport(): {
+    id: string;
+    model: string;
+    y: number;
+    bottom: number;
+    /** Cotes reellement occupees par la maille, en metres. */
+    measured: [number, number, number];
+    /** Cotes annoncees au devis. */
+    nominal: [number, number, number];
+  }[] {
     const box = new THREE.Box3();
-    const report: { id: string; model: string; y: number; bottom: number }[] = [];
+    const span = new THREE.Vector3();
+    const report = [];
     for (const node of this.content.children) {
       const id = node.userData.itemId as string | undefined;
       if (!id) continue;
       const item = this.model?.items.find((entry) => entry.id === id);
       box.setFromObject(node);
+      box.getSize(span);
+      const nominal = (node.userData.nominal as [number, number, number]) ?? [0, 0, 0];
       report.push({
         id,
         model: item?.model3d ?? '?',
         y: Math.round((item?.y ?? 0) * 1000) / 1000,
         bottom: Math.round(box.min.y * 1000) / 1000,
+        measured: [span.x, span.y, span.z].map((value) => Math.round(value * 1000) / 1000) as [number, number, number],
+        nominal,
       });
     }
     return report;
@@ -787,14 +801,32 @@ export class StudioEngine {
     this.outlines = [];
   }
 
+  /**
+   * Remonte un objet dont la maille passe sous le terrain.
+   *
+   * Rien n'empeche de tirer un objet vers le bas au gizmo, et un caisson a
+   * moitie enterre est aussi faux qu'un caisson qui levite. La correction se
+   * fait sur la boite englobante reelle : elle vaut donc aussi pour un objet
+   * incline ou redimensionne, et laisse tranquilles les objets accroches tant
+   * qu'ils restent au-dessus du sol.
+   */
+  private settleOnGround(node: THREE.Object3D): number {
+    const box = new THREE.Box3().setFromObject(node);
+    if (!Number.isFinite(box.min.y) || box.min.y >= -0.001) return node.position.y;
+    node.position.y -= box.min.y;
+    node.updateMatrixWorld(true);
+    return node.position.y;
+  }
+
   /** Renvoie a l'application la position, la rotation et les cotes obtenues. */
   private commitTransform() {
     const scaling = this.gizmo.getMode() === 'scale';
     const read = (node: THREE.Object3D): TransformChange => {
       const nominal = node.userData.nominal as [number, number, number];
+      const y = this.settleOnGround(node);
       const change: Partial<SceneItem> = {
         x: round(node.position.x),
-        y: round(node.position.y),
+        y: round(y),
         z: round(node.position.z),
         rotY: round(node.rotation.y, 3),
         rotX: round(node.rotation.x, 3),
@@ -820,6 +852,25 @@ export class StudioEngine {
     const node = this.gizmo.object;
     if (!node?.userData.itemId) return;
     this.handlers.onTransform([read(node)]);
+  }
+
+  /**
+   * Repose au sol les objets demandes et renvoie les corrections a ecrire.
+   * Complement manuel du calage automatique : sert a rattraper une hauteur
+   * saisie a la main dans le panneau, que le gizmo n'a jamais touchee.
+   */
+  dropToGround(ids: string[]): TransformChange[] {
+    const changes: TransformChange[] = [];
+    for (const node of this.content.children) {
+      const id = node.userData.itemId as string | undefined;
+      if (!id || !ids.includes(id)) continue;
+      const box = new THREE.Box3().setFromObject(node);
+      if (!Number.isFinite(box.min.y) || Math.abs(box.min.y) < 0.001) continue;
+      node.position.y -= box.min.y;
+      node.updateMatrixWorld(true);
+      changes.push({ id, change: { y: round(node.position.y) } });
+    }
+    return changes;
   }
 
   /* ---------------------------------------------------------- decametre */

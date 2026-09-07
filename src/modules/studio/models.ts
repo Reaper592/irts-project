@@ -266,10 +266,19 @@ function emissive(color: string, intensity: number): THREE.MeshStandardMaterial 
 
 /* --------------------------------------------------------- pieces communes */
 
+/**
+ * Pont alu a quatre membrures et diagonales.
+ *
+ * La structure est toujours batie debout, puis basculee : une seule geometrie
+ * a verifier, et une section qui vaut exactement la cote annoncee. Les tubes
+ * sont tangents a cette section, pas centres dessus — un pont 290 construit
+ * sur ses axes mesure 336 mm, et l'ecart se retrouve dans le devis.
+ */
 function trussGeometry(length: number, section: number, vertical: boolean): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const tube = Math.max(0.012, section * 0.08);
-  const half = section / 2;
+  const half = Math.max(tube, section / 2 - tube);
+
   for (const [a, b] of [
     [-half, -half],
     [half, -half],
@@ -277,30 +286,30 @@ function trussGeometry(length: number, section: number, vertical: boolean): THRE
     [half, half],
   ]) {
     const chord = new THREE.CylinderGeometry(tube, tube, length, 8);
-    if (vertical) chord.translate(a, 0, b);
-    else {
-      chord.rotateZ(Math.PI / 2);
-      chord.translate(0, a, b);
-    }
+    chord.translate(a, 0, b);
     parts.push(chord);
   }
+
   const braces = Math.max(2, Math.round(length / (section * 1.7)));
   for (let index = 0; index < braces; index += 1) {
     const t = -length / 2 + (length / braces) * (index + 0.5);
-    for (const axis of [0, 1]) {
-      const brace = new THREE.CylinderGeometry(tube * 0.6, tube * 0.6, section * 1.42, 6);
-      brace.rotateZ(Math.PI / 4);
-      if (axis === 1) brace.rotateY(Math.PI / 2);
-      if (vertical) brace.translate(0, t, axis === 0 ? half : -half);
-      else {
-        brace.rotateZ(Math.PI / 2);
-        brace.rotateX(Math.PI / 2);
-        brace.translate(t, axis === 0 ? half : -half, 0);
-      }
+    // Une diagonale par face laterale, alternee d'une travee a l'autre.
+    const lean = index % 2 ? 1 : -1;
+    for (const [plane, side] of [
+      [0, 1],
+      [1, -1],
+    ]) {
+      const brace = new THREE.CylinderGeometry(tube * 0.6, tube * 0.6, half * 2 * 1.41, 6);
+      brace.rotateZ((Math.PI / 4) * lean);
+      if (plane === 1) brace.rotateY(Math.PI / 2);
+      brace.translate(plane === 0 ? 0 : side * half, t, plane === 0 ? side * half : 0);
       parts.push(brace);
     }
   }
-  return mergeGeometries(parts, false) ?? new THREE.BoxGeometry(length, section, section);
+
+  const geometry = mergeGeometries(parts, false) ?? new THREE.BoxGeometry(section, length, section);
+  if (!vertical) geometry.rotateZ(Math.PI / 2);
+  return geometry;
 }
 
 function chairGeometry(): THREE.BufferGeometry {
@@ -343,6 +352,12 @@ function personGeometry(seated: boolean): THREE.BufferGeometry {
       foot.translate(side * 0.09, 0.03, 0.42);
       parts.push(foot);
     }
+    for (const side of [-1, 1]) {
+      const arm = new THREE.CapsuleGeometry(0.05, 0.34, 4, 8);
+      arm.rotateX(-0.5);
+      arm.translate(side * 0.2, 0.74, 0.02);
+      parts.push(arm);
+    }
     const head = new THREE.SphereGeometry(0.11, 12, 10);
     head.translate(0, 1.06, -0.02);
     parts.push(head);
@@ -353,6 +368,14 @@ function personGeometry(seated: boolean): THREE.BufferGeometry {
     const head = new THREE.SphereGeometry(0.115, 12, 10);
     head.translate(0, 1.44, 0);
     parts.push(head);
+    // Bras : sans eux la silhouette fait 34 cm de large la ou le catalogue en
+    // annonce 50, et l'echelle du plan s'en ressent.
+    for (const side of [-1, 1]) {
+      const arm = new THREE.CapsuleGeometry(0.055, 0.5, 4, 8);
+      arm.rotateZ(side * 0.09);
+      arm.translate(side * 0.2, 0.96, 0);
+      parts.push(arm);
+    }
     for (const side of [-1, 1]) {
       const leg = new THREE.CapsuleGeometry(0.075, 0.36, 4, 8);
       // Le rayon de la capsule deborde sous son centre : sans lui, les pieds
@@ -498,14 +521,23 @@ export function buildObject(
       break;
     }
     case 'monitor': {
-      // Le caisson bascule autour de son centre : il faut le remonter de la
-      // demi-diagonale verticale pour qu'il repose sur son pan incline.
-      const wedge = solid(box(0.56, 0.34, 0.44), m.caisson, 0, 0.267);
-      wedge.rotation.x = -0.62;
-      group.add(wedge);
+      // Vrai coin de retour plutot qu'un caisson bascule : la face avant est
+      // inclinee, mais l'encombrement reste celui du produit — un caisson
+      // pivote depassait de moitie la hauteur annoncee.
+      const wedgeShape = new THREE.Shape();
+      wedgeShape.moveTo(-0.22, 0);
+      wedgeShape.lineTo(0.22, 0);
+      wedgeShape.lineTo(0.22, 0.1);
+      wedgeShape.lineTo(-0.12, 0.34);
+      wedgeShape.lineTo(-0.22, 0.34);
+      wedgeShape.closePath();
+      const wedgeGeometry = new THREE.ExtrudeGeometry(wedgeShape, { depth: 0.56, bevelEnabled: false });
+      wedgeGeometry.rotateY(Math.PI / 2);
+      wedgeGeometry.translate(-0.28, 0, 0);
+      group.add(solid(wedgeGeometry, m.caisson));
       const front = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.28), m.grille);
       front.rotation.x = -0.62;
-      front.position.set(0, 0.367, 0.16);
+      front.position.set(0, 0.2, 0.02);
       group.add(front);
       break;
     }
@@ -519,12 +551,16 @@ export function buildObject(
       break;
     }
     case 'console': {
-      group.add(solid(box(1.5, 0.75, 0.8), m.noirMat, 0, 0.375));
-      const top = solid(box(1.42, 0.09, 0.72), m.plastique, 0, 0.79);
+      parametric = true;
+      // Comme le pupitre compact : la maille suit les cotes du catalogue, pour
+      // que le devis et l'outil de dimensionnement disent la meme chose.
+      const deskH = h * 0.78;
+      group.add(solid(box(w, deskH, d), m.noirMat, 0, deskH / 2));
+      const top = solid(box(w * 0.95, 0.08, d * 0.9), m.plastique, 0, deskH + 0.04);
       top.rotation.x = -0.14;
       group.add(top);
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.28), emissive('#2b6fc4', 1.6));
-      screen.position.set(0, 0.98, -0.16);
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.34, h * 0.24), emissive('#2b6fc4', 1.6));
+      screen.position.set(0, h * 0.88, -d * 0.2);
       screen.rotation.x = -0.34;
       group.add(screen);
       break;
@@ -540,9 +576,29 @@ export function buildObject(
     }
     case 'amp-rack':
     case 'rack-technique': {
-      group.add(solid(box(0.6, 1.2, 0.75), m.noirMat, 0, 0.6));
-      for (let index = 0; index < 5; index += 1) {
-        group.add(solid(box(0.52, 0.14, 0.02), m.metal, 0, 0.25 + index * 0.2, 0.376));
+      parametric = true;
+      // Flight-case aux cotes annoncees : coques, cornieres, fermetures
+      // papillon et roulettes. La maille doit mesurer exactement w x h x d,
+      // sinon l'outil « Dimensionner », qui divise par la cote nominale,
+      // renvoie la moitie de ce qu'on lui demande.
+      const castor = Math.min(0.06, h * 0.08);
+      const body = h - castor * 2;
+      const floor = castor * 2;
+      group.add(solid(roundedBox(w, body, d, 0.02), m.noirMat, 0, floor + body / 2));
+      group.add(solid(box(w * 0.98, 0.02, d * 0.98), m.alu, 0, floor + body * 0.62));
+      for (const side of [-1, 1]) {
+        group.add(solid(box(0.03, body * 0.9, 0.03), m.alu, (side * w) / 2, floor + body / 2, d / 2 - 0.02));
+        group.add(solid(box(0.09, 0.07, 0.03), m.metal, (side * w) / 4, floor + body * 0.62, d / 2 + 0.01));
+      }
+      for (const [sx, sz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ]) {
+        group.add(
+          solid(new THREE.CylinderGeometry(castor, castor, 0.04, 12), m.noirMat, sx * (w / 2 - 0.08), castor, sz * (d / 2 - 0.08)),
+        );
       }
       break;
     }
@@ -769,7 +825,10 @@ export function buildObject(
       group.add(solid(trussGeometry(h, section, true), m.alu, -w / 2 + section / 2, h / 2));
       group.add(solid(trussGeometry(h, section, true), m.alu, w / 2 - section / 2, h / 2));
       group.add(solid(trussGeometry(w, section, false), m.alu, 0, h));
-      for (const side of [-1, 1]) group.add(solid(box(1, 0.1, 1), m.noirMat, (side * w) / 2, 0.05));
+      // Embases calees sur la section du pont : une plaque d'un metre carre,
+      // fixe quelle que soit la structure, debordait de l'emprise annoncee.
+      const plate = Math.min(d, Math.max(0.3, section * 1.4));
+      for (const side of [-1, 1]) group.add(solid(box(plate, 0.1, plate), m.noirMat, (side * w) / 2, 0.05));
       break;
     }
     case 'stage-deck': {
@@ -833,7 +892,11 @@ export function buildObject(
     }
     case 'pipe-drape': {
       parametric = true;
-      for (const side of [-1, 1]) group.add(solid(cyl(0.025, h, 8), m.metal, (side * w) / 2, h / 2));
+      for (const side of [-1, 1]) {
+        group.add(solid(cyl(0.025, h, 8), m.metal, (side * w) / 2, h / 2));
+        // Embase lestee : c'est elle qui occupe la profondeur annoncee.
+        group.add(solid(roundedBox(d * 0.8, 0.04, d, 0.01), m.noirMat, (side * w) / 2, 0.02));
+      }
       const beam = solid(cyl(0.02, w, 8), m.metal, 0, h);
       beam.rotation.z = Math.PI / 2;
       group.add(beam);
@@ -858,11 +921,13 @@ export function buildObject(
       for (let index = 0; index < modules; index += 1) {
         const mw = w / modules;
         const x = -w / 2 + mw * (index + 0.5);
-        group.add(solid(roundedBox(mw - 0.02, h - 0.06, d, 0.015), m.bois, x, (h - 0.06) / 2));
-        group.add(solid(box(mw - 0.06, h * 0.62, 0.012), m.boisClair, x, h * 0.42, d / 2 + 0.008));
+        group.add(solid(roundedBox(mw - 0.02, h - 0.06, d - 0.14, 0.015), m.bois, x, (h - 0.06) / 2));
+        group.add(solid(box(mw - 0.06, h * 0.62, 0.012), m.boisClair, x, h * 0.42, d / 2 - 0.062));
       }
-      group.add(solid(roundedBox(w + 0.14, 0.06, d + 0.16, 0.02), m.noirMat, 0, h - 0.03));
-      group.add(solid(box(w, 0.04, 0.04), m.inox, 0, 0.12, d / 2 + 0.06));
+      // Le debord du plan de bar est compris dans la profondeur annoncee :
+      // les caissons sont donc en retrait, pas le plateau en saillie.
+      group.add(solid(roundedBox(w, 0.06, d, 0.02), m.noirMat, 0, h - 0.03));
+      group.add(solid(box(w * 0.96, 0.04, 0.04), m.inox, 0, 0.12, d / 2 - 0.05));
       break;
     }
     case 'back-bar': {
@@ -944,7 +1009,8 @@ export function buildObject(
     case 'armchair': {
       parametric = true;
       group.add(solid(box(w, h * 0.5, d), m.tissu, 0, h * 0.25));
-      group.add(solid(box(w, h * 0.6, d * 0.22), m.tissu, 0, h * 0.55, -d / 2 + d * 0.11));
+      // Le dossier atteint la hauteur annoncee du siege.
+      group.add(solid(box(w, h * 0.7, d * 0.22), m.tissu, 0, h * 0.65, -d / 2 + d * 0.11));
       for (const side of [-1, 1]) group.add(solid(box(w * 0.1, h * 0.7, d), m.tissu, side * (w / 2 - w * 0.05), h * 0.35));
       break;
     }
@@ -1010,7 +1076,11 @@ export function buildObject(
       const shell = new THREE.MeshStandardMaterial({ color: 0x36414c, roughness: 0.72, metalness: 0.04 });
       group.add(solid(new THREE.CylinderGeometry(0.25, 0.21, 0.85, 18), shell, 0, 0.425));
       group.add(solid(new THREE.CylinderGeometry(0.27, 0.27, 0.05, 18), m.noirMat, 0, 0.87));
-      group.add(solid(new THREE.TorusGeometry(0.2, 0.012, 6, 18), m.metal, 0, 0.89));
+      // Le cerclage est a plat sur le couvercle : dresse, il ajoutait 20 cm
+      // a la hauteur du produit.
+      const ring = solid(new THREE.TorusGeometry(0.2, 0.012, 6, 18), m.metal, 0, 0.878);
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
       break;
     }
 
@@ -1142,10 +1212,12 @@ export function buildObject(
         const point = curve.getPoint(index / 89);
         matrix.makeScale(0.7 + Math.random() * 0.8, 0.7 + Math.random() * 0.8, 0.7 + Math.random() * 0.8);
         // Le feuillage se disperse autour du tube mais jamais sous le sol.
+        // Le feuillage se disperse autour du tube sans sortir de l'emprise
+        // annoncee ni passer sous le sol.
         matrix.setPosition(
-          point.x + (Math.random() - 0.5) * 0.22,
+          THREE.MathUtils.clamp(point.x + (Math.random() - 0.5) * 0.22, -w / 2 + 0.2, w / 2 - 0.2),
           Math.max(0.2, point.y + (Math.random() - 0.5) * 0.22),
-          (Math.random() - 0.5) * 0.25,
+          THREE.MathUtils.clamp((Math.random() - 0.5) * 0.25, -d / 2 + 0.2, d / 2 - 0.2),
         );
         foliage.setMatrixAt(index, matrix);
       }
@@ -1157,7 +1229,7 @@ export function buildObject(
     case 'plante': {
       parametric = true;
       group.add(solid(new THREE.CylinderGeometry(w * 0.3, w * 0.22, h * 0.28, 14), m.bois, 0, h * 0.14));
-      const bush = solid(new THREE.IcosahedronGeometry(w * 0.42, 1), m.feuillage, 0, h * 0.68);
+      const bush = solid(new THREE.IcosahedronGeometry(w / 2, 1), m.feuillage, 0, h * 0.68);
       bush.scale.y = 1.25;
       group.add(bush);
       break;
@@ -1178,10 +1250,12 @@ export function buildObject(
     }
     case 'tapis': {
       parametric = true;
-      const rug = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m.moquetteRouge);
-      rug.rotation.x = -Math.PI / 2;
-      rug.position.y = 0.012;
+      // Le tapis a l'epaisseur annoncee : un plan sans epaisseur affiche une
+      // hauteur nulle et disparait sous le sol des qu'on l'incline.
+      const rug = new THREE.Mesh(box(w, h, d), m.moquetteRouge);
+      rug.position.y = h / 2;
       rug.receiveShadow = true;
+      rug.castShadow = true;
       group.add(rug);
       break;
     }
@@ -1238,10 +1312,22 @@ export function buildObject(
     }
     case 'cable-ramp': {
       parametric = true;
-      const ramp = solid(new THREE.CylinderGeometry(h * 1.6, h * 1.6, w, 12, 1, false, 0, Math.PI), m.noirMat, 0, 0);
-      ramp.rotation.z = Math.PI / 2;
-      ramp.scale.set(1, 1, 0.6);
-      group.add(ramp);
+      // Profil trapezoidal a la largeur annoncee : un passage de cables se
+      // franchit en vehicule, sa base fait bien la cote du catalogue.
+      const profile = new THREE.Shape();
+      profile.moveTo(-d / 2, 0);
+      profile.lineTo(d / 2, 0);
+      profile.lineTo(d * 0.34, h);
+      profile.lineTo(-d * 0.34, h);
+      profile.closePath();
+      const geometry = new THREE.ExtrudeGeometry(profile, { depth: w, bevelEnabled: false });
+      geometry.rotateY(Math.PI / 2);
+      geometry.translate(-w / 2, 0, 0);
+      group.add(solid(geometry, m.noirMat));
+      // Rainures des passages de cables, visibles de dessus.
+      for (const side of [-1, 1]) {
+        group.add(solid(box(w * 0.96, 0.012, d * 0.16), m.metal, 0, h + 0.001, side * d * 0.14));
+      }
       break;
     }
     case 'wc-mobile': {
@@ -1265,10 +1351,12 @@ export function buildObject(
     }
     case 'camion': {
       parametric = true;
-      group.add(solid(box(w, h * 0.62, d * 0.72), m.peinture, 0, h * 0.42, -d * 0.12));
-      group.add(solid(box(w * 0.95, h * 0.4, d * 0.24), m.peinture, 0, h * 0.32, d / 2 - d * 0.12));
+      // La caisse monte jusqu'a la hauteur annoncee : un porteur de 3,20 m qui
+      // n'en fait que 2,34 fausse a la fois l'image et le gabarit routier.
+      group.add(solid(box(w, h * 0.7, d * 0.72), m.peinture, 0, h * 0.65, -d * 0.12));
+      group.add(solid(box(w * 0.95, h * 0.45, d * 0.24), m.peinture, 0, h * 0.525, d / 2 - d * 0.12));
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.85, h * 0.18), m.verre);
-      glass.position.set(0, h * 0.42, d / 2 + 0.005);
+      glass.position.set(0, h * 0.6, d / 2 + 0.005);
       group.add(glass);
       for (const [sx, sz] of [
         [-1, -1],
@@ -1276,7 +1364,7 @@ export function buildObject(
         [-1, 1],
         [1, 1],
       ]) {
-        const wheel = solid(new THREE.CylinderGeometry(h * 0.16, h * 0.16, 0.24, 16), m.noirMat, sx * (w / 2 - 0.05), h * 0.16, sz * (d / 2 - d * 0.2));
+        const wheel = solid(new THREE.CylinderGeometry(h * 0.15, h * 0.15, 0.24, 16), m.noirMat, sx * (w / 2 - 0.05), h * 0.15, sz * (d / 2 - d * 0.2));
         wheel.rotation.z = Math.PI / 2;
         group.add(wheel);
       }
@@ -1307,23 +1395,28 @@ export function buildObject(
       /* ----------------------------------------------------- son (variantes) */
       case 'console-compact':
       case 'light-desk': {
-        group.add(solid(roundedBox(1.4, 0.75, 0.75, 0.02), m.noirMat, 0, 0.375));
-        const top = solid(roundedBox(1.34, 0.08, 0.68, 0.015), m.plastique, 0, 0.79);
+        parametric = true;
+        // Deux references partageaient une maille figee a 1,40 m : aucune des
+        // deux n'etait a ses cotes. Le pupitre se construit donc sur w/h/d.
+        const deskH = h * 0.78;
+        group.add(solid(roundedBox(w, deskH, d, 0.02), m.noirMat, 0, deskH / 2));
+        const top = solid(roundedBox(w * 0.96, 0.06, d * 0.9, 0.015), m.plastique, 0, deskH + 0.03);
         top.rotation.x = -0.14;
         group.add(top);
-        const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.24), emissive('#2b6fc4', 1.6));
-        screen.position.set(0, 0.96, -0.14);
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.34, h * 0.24), emissive('#2b6fc4', 1.6));
+        screen.position.set(0, h * 0.88, -d * 0.18);
         screen.rotation.x = -0.34;
         group.add(screen);
         break;
       }
       case 'hf-rack': {
-        group.add(solid(roundedBox(0.6, 1.1, 0.7, 0.02), m.noirMat, 0, 0.55));
+        // Antennes comprises dans la hauteur annoncee du rack.
+        group.add(solid(roundedBox(0.6, 0.9, 0.7, 0.02), m.noirMat, 0, 0.45));
         for (let index = 0; index < 4; index += 1) {
-          group.add(solid(box(0.52, 0.12, 0.02), m.metal, 0, 0.25 + index * 0.2, 0.351));
+          group.add(solid(box(0.52, 0.12, 0.02), m.metal, 0, 0.22 + index * 0.16, 0.351));
         }
         for (const side of [-1, 1]) {
-          group.add(solid(cyl(0.006, 0.5, 6), m.metal, side * 0.2, 1.35, 0.3));
+          group.add(solid(cyl(0.006, 0.2, 6), m.metal, side * 0.2, 1, 0.3));
         }
         break;
       }
@@ -1408,7 +1501,9 @@ export function buildObject(
         group.add(solid(roundedBox(w, 0.04, d, 0.008), m.boisClair, 0, h - 0.02));
         for (const side of [-1, 1]) {
           group.add(solid(box(0.05, h - 0.04, 0.05), m.metal, side * (w / 2 - 0.22), (h - 0.04) / 2, 0));
-          group.add(solid(box(0.045, 0.03, d * 1.6), m.metal, side * (w / 2 - 0.22), 0.02, 0));
+          // Patin dans l'emprise du banc : un pied plus large que l'assise
+          // fausse le volume de transport.
+          group.add(solid(box(0.045, 0.03, d), m.metal, side * (w / 2 - 0.22), 0.02, 0));
         }
         break;
       }
@@ -1436,39 +1531,57 @@ export function buildObject(
         break;
       }
       case 'transat': {
+        // Chilienne : le brancard va du pied avant, au sol, jusqu'au sommet du
+        // dossier arriere. Sa longueur et son inclinaison decoulent des cotes
+        // annoncees, elles ne sont plus posees a la main.
         const frame = m.boisClair;
         const cloth = new THREE.MeshStandardMaterial({ color: 0x2f5e86, roughness: 0.95 });
-        const seat = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 1.25, 1, 6), cloth);
-        seat.rotation.x = -0.72;
-        seat.position.set(0, 0.53, 0.05);
+        const front = 0.72;
+        const back = -0.72;
+        const rise = 0.84;
+        const railLength = Math.hypot(front - back, rise);
+        // Angle mesure depuis la verticale : c'est l'axe du cylindre construit
+        // par `post`, pas l'horizontale.
+        const lean = Math.atan2(front - back, rise);
+
+        for (const side of [-1, 1]) {
+          const rail = solid(post(0.022, railLength), frame, side * 0.29, rise / 2, (front + back) / 2);
+          rail.rotation.x = -lean;
+          group.add(rail);
+          // Pied avant : il ferme le triangle et pose la chilienne au sol.
+          const leg = solid(post(0.022, 0.52), frame, side * 0.29, 0.25, 0.36);
+          leg.rotation.x = -0.42;
+          group.add(leg);
+        }
+        // Traverse haute du dossier.
+        const bar = solid(cyl(0.018, 0.58, 8), frame, 0, rise - 0.02, back + 0.04);
+        bar.rotation.z = Math.PI / 2;
+        group.add(bar);
+
+        const seat = new THREE.Mesh(new THREE.PlaneGeometry(0.55, railLength * 0.94, 1, 6), cloth);
+        seat.rotation.x = -lean;
+        seat.position.set(0, rise / 2 + 0.012, (front + back) / 2);
         seat.castShadow = true;
         seat.material.side = THREE.DoubleSide;
         group.add(seat);
-        for (const side of [-1, 1]) {
-          const rail = solid(post(0.022, 1.35), frame, side * 0.3, 0.53, 0.05);
-          rail.rotation.x = 0.72;
-          group.add(rail);
-          const leg = solid(post(0.022, 0.85), frame, side * 0.3, 0.385, -0.3);
-          leg.rotation.x = -0.5;
-          group.add(leg);
-        }
         break;
       }
 
       /* ------------------------------------------------- bar & restauration */
       case 'pompe-biere': {
-        group.add(solid(roundedBox(0.4, 0.42, 0.45, 0.03), m.inox, 0, 0.21));
+        group.add(solid(roundedBox(0.4, 0.36, 0.45, 0.03), m.inox, 0, 0.18));
         for (const side of [-1, 1]) {
-          const column = solid(cyl(0.035, 0.28, 12), m.inox, side * 0.09, 0.56);
+          const column = solid(cyl(0.035, 0.24, 12), m.inox, side * 0.09, 0.48);
           group.add(column);
-          const tap = solid(cyl(0.018, 0.12, 8), m.inox, side * 0.09, 0.66, 0.09);
+          const tap = solid(cyl(0.018, 0.12, 8), m.inox, side * 0.09, 0.55, 0.09);
           tap.rotation.x = Math.PI / 2;
           group.add(tap);
-          const handle = solid(cyl(0.014, 0.1, 8), m.noirMat, side * 0.09, 0.74, 0.09);
+          // Manette dans la hauteur du produit : elle depassait de 14 cm.
+          const handle = solid(cyl(0.014, 0.1, 8), m.noirMat, side * 0.09, 0.61, 0.09);
           handle.rotation.x = 0.5;
           group.add(handle);
         }
-        const drip = solid(box(0.34, 0.02, 0.16), m.inox, 0, 0.43, 0.14);
+        const drip = solid(box(0.34, 0.02, 0.16), m.inox, 0, 0.37, 0.14);
         group.add(drip);
         break;
       }
@@ -1519,10 +1632,11 @@ export function buildObject(
       }
       case 'plancha': {
         parametric = true;
-        group.add(solid(roundedBox(w * 0.92, h * 0.72, d * 0.9, 0.02), m.inox, 0, h * 0.36));
-        const plate = solid(box(w * 0.86, 0.04, d * 0.72), m.noirMat, 0, h * 0.74);
+        // Le dosseret arrive a la hauteur annoncee du meuble.
+        group.add(solid(roundedBox(w * 0.92, h * 0.86, d * 0.9, 0.02), m.inox, 0, h * 0.51));
+        const plate = solid(box(w * 0.86, 0.04, d * 0.72), m.noirMat, 0, h * 0.92);
         group.add(plate);
-        group.add(solid(box(w * 0.9, 0.05, 0.04), m.inox, 0, h * 0.8, d * 0.4));
+        group.add(solid(box(w * 0.9, 0.1, 0.04), m.inox, 0, h - 0.05, d * 0.4));
         for (const [sx, sz] of [
           [-1, -1],
           [1, -1],
@@ -1586,7 +1700,8 @@ export function buildObject(
         for (const side of [-1, 0.35]) {
           group.add(solid(box(w * 0.34, 0.22, d * 0.6), m.metal, side * w * 0.24, h - 0.14));
         }
-        const tap = solid(cyl(0.018, 0.35, 8), m.inox, 0, h + 0.17, -d * 0.32);
+        // Le mitigeur reste dans la hauteur annoncee du meuble.
+        const tap = solid(cyl(0.018, 0.22, 8), m.inox, 0, h - 0.11, -d * 0.32);
         group.add(tap);
         for (const [sx, sz] of [
           [-1, -1],
@@ -1626,13 +1741,15 @@ export function buildObject(
       }
       case 'foodtruck': {
         parametric = true;
-        group.add(solid(roundedBox(w, h * 0.62, d, 0.06), m.peinture, 0, h * 0.42));
+        // La caisse monte jusqu'a la hauteur annoncee, et l'auvent se replie
+        // dans la largeur : deploye au-dela, il faussait l'emprise au sol.
+        group.add(solid(roundedBox(w, h * 0.72, d, 0.06), m.peinture, 0, h * 0.64));
         // Comptoir ouvert sur le cote long.
         const opening = new THREE.Mesh(new THREE.PlaneGeometry(d * 0.6, h * 0.3), emissive('#f5e2b8', 0.5));
-        opening.position.set(w / 2 + 0.005, h * 0.52, 0);
+        opening.position.set(w / 2 + 0.005, h * 0.6, 0);
         opening.rotation.y = Math.PI / 2;
         group.add(opening);
-        const awning = solid(box(0.9, 0.04, d * 0.62), m.toile, w / 2 + 0.42, h * 0.78, 0);
+        const awning = solid(box(w * 0.34, 0.04, d * 0.62), m.toile, w / 2 - w * 0.17, h * 0.95, 0);
         awning.rotation.z = -0.28;
         group.add(awning);
         group.add(solid(box(w * 0.9, 0.12, 0.3), m.noirMat, 0, 0.06, -d / 2 + 0.4));
@@ -1651,10 +1768,14 @@ export function buildObject(
       /* -------------------------------------------- sanitaires & confort */
       case 'wc-pmr': {
         parametric = true;
-        group.add(solid(roundedBox(w, h, d, 0.03), m.peintureFroide, 0, h / 2));
-        group.add(solid(roundedBox(w * 0.5, h * 0.85, 0.04, 0.02), m.plastique, 0, (h * 0.85) / 2, d / 2 + 0.02));
-        const ramp = solid(box(w * 0.8, 0.05, 0.9), m.metal, 0, 0.12, d / 2 + 0.45);
-        ramp.rotation.x = 0.14;
+        // La rampe d'acces fait partie de l'emprise annoncee : cabine sur les
+        // deux tiers de la profondeur, rampe sur le tiers restant.
+        const cabin = d * 0.7;
+        const back = -d / 2 + cabin / 2;
+        group.add(solid(roundedBox(w, h, cabin, 0.03), m.peintureFroide, 0, h / 2, back));
+        group.add(solid(roundedBox(w * 0.5, h * 0.85, 0.04, 0.02), m.plastique, 0, (h * 0.85) / 2, back + cabin / 2 + 0.02));
+        const ramp = solid(box(w * 0.8, 0.05, d * 0.3), m.metal, 0, 0.1, d / 2 - d * 0.15);
+        ramp.rotation.x = 0.2;
         group.add(ramp);
         break;
       }
@@ -1686,11 +1807,16 @@ export function buildObject(
       }
       case 'chauffage-air-pulse': {
         parametric = true;
-        const body = solid(new THREE.CylinderGeometry(h * 0.35, h * 0.35, w, 18), m.peinture, 0, h * 0.45);
+        // Virole et collerette de soufflage tiennent dans la longueur annoncee.
+        const barrel = h * 0.33;
+        const body = solid(new THREE.CylinderGeometry(barrel, barrel, w * 0.9, 18), m.peinture, 0, h - barrel);
         body.rotation.z = Math.PI / 2;
         group.add(body);
         group.add(solid(box(w * 0.9, 0.1, d * 0.7), m.noirMat, 0, 0.05));
-        group.add(solid(new THREE.TorusGeometry(h * 0.3, 0.04, 8, 16), m.metal, w / 2, h * 0.45, 0));
+        // Collerette de soufflage a plat sur l'axe de la virole.
+        const collar = solid(new THREE.TorusGeometry(barrel * 0.9, 0.04, 8, 16), m.metal, w * 0.45, h - barrel, 0);
+        collar.rotation.y = Math.PI / 2;
+        group.add(collar);
         break;
       }
 
@@ -1718,23 +1844,33 @@ export function buildObject(
       case 'remorque': {
         parametric = true;
         const tarp = new THREE.MeshStandardMaterial({ color: 0x39424c, roughness: 0.92, metalness: 0.02 });
-        group.add(solid(roundedBox(w, h * 0.68, d, 0.04), tarp, 0, h * 0.5));
-        group.add(solid(box(w * 0.96, 0.1, d), m.metal, 0, h * 0.14));
-        const draw = solid(box(0.08, 0.08, 0.9), m.metal, 0, h * 0.14, d / 2 + 0.45);
+        // Le timon est compris dans la longueur annoncee : c'est ainsi que se
+        // mesure une remorque, et c'est cette cote qui sert au chargement.
+        const bed = d * 0.72;
+        const rear = -d / 2 + bed / 2;
+        group.add(solid(roundedBox(w, h * 0.72, bed, 0.04), tarp, 0, h * 0.64, rear));
+        group.add(solid(box(w * 0.96, 0.1, bed), m.metal, 0, h * 0.14, rear));
+        const draw = solid(box(0.08, 0.08, d * 0.3), m.metal, 0, h * 0.14, d / 2 - d * 0.15);
         group.add(draw);
         for (const side of [-1, 1]) {
-          const wheel = solid(new THREE.CylinderGeometry(0.28, 0.28, 0.16, 16), m.noirMat, side * (w / 2 + 0.02), 0.28, 0);
+          const wheel = solid(new THREE.CylinderGeometry(0.28, 0.28, 0.16, 16), m.noirMat, side * (w / 2 - 0.08), 0.28, rear);
           wheel.rotation.z = Math.PI / 2;
           group.add(wheel);
         }
         break;
       }
       case 'diable': {
-        group.add(solid(box(0.5, 1.2, 0.04), m.metal, 0, 0.62, -0.02));
-        group.add(solid(box(0.5, 0.04, 0.28), m.metal, 0, 0.06, 0.14));
+        // Dosseret incline vers l'arriere et bavette avancee : l'empattement
+        // occupe bien les 60 cm annonces, qui sont ceux du transport.
+        const frame = solid(box(0.5, 1.24, 0.04), m.metal, 0, 0.66, -0.12);
+        frame.rotation.x = 0.1;
+        group.add(frame);
+        group.add(solid(box(0.5, 0.04, 0.34), m.metal, 0, 0.06, 0.11));
         for (const side of [-1, 1]) {
-          group.add(solid(post(0.018, 1.2), m.metal, side * 0.22, 0.62, 0));
-          const wheel = solid(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 14), m.noirMat, side * 0.24, 0.11, -0.02);
+          const post2 = solid(post(0.018, 1.24), m.metal, side * 0.22, 0.66, -0.12);
+          post2.rotation.x = 0.1;
+          group.add(post2);
+          const wheel = solid(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 14), m.noirMat, side * 0.24, 0.11, -0.2);
           wheel.rotation.z = Math.PI / 2;
           group.add(wheel);
         }
@@ -1771,11 +1907,13 @@ export function buildObject(
         break;
       }
       case 'extincteur': {
-        group.add(solid(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0xc02020, roughness: 0.42, metalness: 0.2 }), 0, 0.32));
-        group.add(solid(cyl(0.03, 0.08, 10), m.noirMat, 0, 0.61));
-        group.add(solid(box(0.02, 0.9, 0.02), m.metal, 0, 0.45, -0.1));
+        // Support sur socle : c'est l'embase qui donne l'emprise annoncee.
+        group.add(solid(roundedBox(0.3, 0.03, 0.3, 0.01), m.metal, 0, 0.015));
+        group.add(solid(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0xc02020, roughness: 0.42, metalness: 0.2 }), 0, 0.31));
+        group.add(solid(cyl(0.03, 0.08, 10), m.noirMat, 0, 0.6));
+        group.add(solid(box(0.02, 1.05, 0.02), m.metal, 0, 0.55, -0.11));
         const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), emissive('#c02020', 0.6));
-        sign.position.set(0, 1.05, -0.1);
+        sign.position.set(0, 1.09, -0.1);
         group.add(sign);
         break;
       }
