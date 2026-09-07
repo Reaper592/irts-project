@@ -241,7 +241,8 @@ const GROUND_PAINTERS: Record<string, { paint: Painter; repeat: number; roughnes
         ctx.lineTo(Math.random() * size, Math.random() * size);
         ctx.stroke();
       }
-      macroVariation(ctx, size, 0.09, 24);
+      // Variation legere : une dalle beton n'est pas marbree.
+      macroVariation(ctx, size, 0.035, 18);
       grain(ctx, size, 12);
     },
   },
@@ -375,7 +376,7 @@ export function groundMaterial(
     metalness: config.metalness,
     color: new THREE.Color(tint).multiplyScalar(nightFactor),
   });
-  applyMacroBreakup(material);
+  applyMacroBreakup(material, BREAKUP[kind] ?? 0.4);
   return material;
 }
 
@@ -388,7 +389,27 @@ export function groundMaterial(
  * independant des UV. Deux octaves — une vingtaine et une soixantaine de
  * metres — suffisent a faire disparaitre la grille sans salir la couleur.
  */
-function applyMacroBreakup(material: THREE.MeshStandardMaterial) {
+/**
+ * Amplitude de la rupture, par nature de sol.
+ *
+ * Une pelouse ou une terre battue varient beaucoup d'un metre a l'autre ; une
+ * dalle beton, un bitume ou un parquet non. Appliquer la meme amplitude a
+ * tous donne a une surface manufacturee un aspect de camouflage.
+ */
+const BREAKUP: Record<string, number> = {
+  herbe: 0.42,
+  'gazon-tondu': 0.34,
+  terre: 0.44,
+  sable: 0.36,
+  gravier: 0.3,
+  beton: 0.14,
+  bitume: 0.12,
+  parquet: 0.08,
+  moquette: 0.1,
+  dalle: 0.1,
+};
+
+function applyMacroBreakup(material: THREE.MeshStandardMaterial, amount: number) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vMacroPos;')
@@ -417,11 +438,11 @@ function applyMacroBreakup(material: THREE.MeshStandardMaterial) {
         '#include <map_fragment>',
         `#include <map_fragment>
         float macro = macroNoise(vMacroPos.xz * 0.055) * 0.6 + macroNoise(vMacroPos.xz * 0.017) * 0.4;
-        diffuseColor.rgb *= 0.80 + macro * 0.40;`,
+        diffuseColor.rgb *= ${(1 - amount / 2).toFixed(3)} + macro * ${amount.toFixed(3)};`,
       );
   };
   // Deux materiaux au shader different ne doivent pas partager un programme.
-  material.customProgramCacheKey = () => 'macro-breakup';
+  material.customProgramCacheKey = () => `macro-breakup-${amount.toFixed(3)}`;
 }
 
 /* ------------------------------------------------------------- materiaux */

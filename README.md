@@ -101,9 +101,12 @@ tunnel HTTPS.
 
 Chaque objet de la bibliothèque porte à la fois son modèle 3D et sa fiche
 produit : marque, modèle, unité de facturation, prix, poids et puissance. Le
-catalogue de l'application est **généré depuis cette bibliothèque**, si bien
-qu'un objet posé dans une scène arrive dans le devis sans ressaisie, avec sa
-désignation, ses cotes réelles et son prix. Les quantités facturées suivent la
+catalogue de l'application est **généré depuis cette bibliothèque** — cent
+vingt-sept objets, treize familles — si bien qu'un objet posé dans une scène
+arrive dans le devis sans ressaisie, avec sa désignation, ses cotes réelles et
+son prix. Une base déjà en service reçoit les objets ajoutés d'une version à
+l'autre : la migration complète le catalogue sans écraser les prix ni les
+stocks ajustés. Les quantités facturées suivent la
 nature de l'objet : un bar au mètre de comptoir, un mur LED à la dalle, une
 piste de danse au mètre carré, une guirlande à la longueur, un bloc de sièges à
 la place.

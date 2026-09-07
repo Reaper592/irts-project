@@ -596,9 +596,11 @@ export function buildObject(
         [-1, 1],
         [1, 1],
       ]) {
-        group.add(
-          solid(new THREE.CylinderGeometry(castor, castor, 0.04, 12), m.noirMat, sx * (w / 2 - 0.08), castor, sz * (d / 2 - 0.08)),
-        );
+        // Roulette posee sur sa tranche : construite a plat, elle laissait la
+        // malle a quatre centimetres du sol.
+        const wheel = solid(new THREE.CylinderGeometry(castor, castor, 0.04, 12), m.noirMat, sx * (w / 2 - 0.08), castor, sz * (d / 2 - 0.08));
+        wheel.rotation.z = Math.PI / 2;
+        group.add(wheel);
       }
       break;
     }
@@ -1977,6 +1979,283 @@ export function buildObject(
         break;
       }
 
+    /* ================================= complements guinguette & festival */
+    case 'tabouret-bar': {
+      group.add(solid(new THREE.CylinderGeometry(w / 2, w / 2, 0.05, 20), m.bois, 0, h - 0.025));
+      for (let leg = 0; leg < 4; leg += 1) {
+        const angle = (leg / 4) * Math.PI * 2 + Math.PI / 4;
+        const foot = solid(post(0.014, h - 0.05), m.metal, Math.cos(angle) * w * 0.3, (h - 0.05) / 2, Math.sin(angle) * d * 0.3);
+        group.add(foot);
+      }
+      // Repose-pied : l'anneau qui fait reconnaitre un tabouret de bar.
+      const footRing = solid(new THREE.TorusGeometry(w * 0.3, 0.011, 6, 20), m.metal, 0, h * 0.28);
+      footRing.rotation.x = Math.PI / 2;
+      group.add(footRing);
+      break;
+    }
+    case 'tonneau': {
+      // Barrique : douelles galbees, cercles de fer et plateau de service.
+      const stave = new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(w * 0.4, 0),
+          new THREE.Vector2(w * 0.5, h * 0.3),
+          new THREE.Vector2(w * 0.5, h * 0.66),
+          new THREE.Vector2(w * 0.4, h * 0.96),
+          new THREE.Vector2(0, h * 0.96),
+        ],
+        24,
+      );
+      group.add(solid(stave, m.bois));
+      for (const level of [0.1, 0.48, 0.86]) {
+        const hoop = solid(new THREE.TorusGeometry(w * (level === 0.48 ? 0.505 : 0.45), 0.012, 6, 24), m.metal, 0, h * level);
+        hoop.rotation.x = Math.PI / 2;
+        group.add(hoop);
+      }
+      group.add(solid(new THREE.CylinderGeometry(w * 0.48, w * 0.48, 0.04, 24), m.boisClair, 0, h - 0.02));
+      break;
+    }
+    case 'botte-paille': {
+      parametric = true;
+      const straw = new THREE.MeshStandardMaterial({ color: 0xc9a95e, roughness: 0.98, metalness: 0 });
+      group.add(solid(roundedBox(w, h, d, 0.03), straw, 0, h / 2));
+      // Ficelles de pressage.
+      for (const offset of [-0.26, 0.26]) {
+        group.add(solid(box(0.012, h * 1.01, d * 1.01), m.noirMat, offset * w, h / 2, 0));
+      }
+      break;
+    }
+    case 'oriflamme': {
+      parametric = true;
+      group.add(solid(new THREE.CylinderGeometry(d * 0.5, d * 0.5, 0.03, 14), m.noirMat, 0, 0.015));
+      group.add(solid(cyl(0.016, h, 8), m.alu, -w * 0.32, h / 2));
+      // Voile en goutte, legerement gondolee par le vent.
+      const sail = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.62, h * 0.72, 6, 8), m.toile);
+      const sailPos = sail.geometry.attributes.position;
+      for (let index = 0; index < sailPos.count; index += 1) {
+        const t = (sailPos.getX(index) + w * 0.31) / (w * 0.62);
+        sailPos.setZ(index, Math.sin(t * 3.4) * 0.06 * t);
+      }
+      sail.geometry.computeVertexNormals();
+      sail.material.side = THREE.DoubleSide;
+      sail.position.set(-w * 0.32 + w * 0.31, h * 0.6, 0);
+      sail.castShadow = true;
+      group.add(sail);
+      break;
+    }
+    case 'urinoir': {
+      parametric = true;
+      // Cuve centrale et quatre postes en etoile, comme les modeles de festival.
+      const shell = new THREE.MeshStandardMaterial({ color: 0x8f9a8d, roughness: 0.68, metalness: 0.02 });
+      const bowlMat = new THREE.MeshStandardMaterial({ color: 0xd7dcd6, roughness: 0.42, metalness: 0.02 });
+      group.add(solid(new THREE.CylinderGeometry(w * 0.34, w * 0.4, h * 0.18, 16), shell, 0, h * 0.09));
+      group.add(solid(new THREE.CylinderGeometry(w * 0.16, w * 0.2, h * 0.86, 14), shell, 0, h * 0.53));
+      for (let station = 0; station < 4; station += 1) {
+        const angle = (station / 4) * Math.PI * 2 + Math.PI / 4;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        // Vasque ouverte vers l'exterieur, sur son bras de raccordement.
+        const bowl = solid(
+          new THREE.CylinderGeometry(w * 0.16, w * 0.1, h * 0.34, 14, 1, true, Math.PI * 0.25, Math.PI * 1.5),
+          bowlMat,
+          cos * w * 0.26,
+          h * 0.6,
+          sin * d * 0.26,
+        );
+        bowl.rotation.y = -angle;
+        bowl.rotation.x = 0.12;
+        (bowl.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+        group.add(bowl);
+        group.add(solid(box(w * 0.16, h * 0.05, 0.03), shell, cos * w * 0.12, h * 0.44, sin * d * 0.12));
+        // Cloison de pudeur entre deux postes.
+        const screen = solid(box(0.02, h * 0.5, w * 0.24), shell, Math.cos(angle + Math.PI / 4) * w * 0.24, h * 0.62, Math.sin(angle + Math.PI / 4) * d * 0.24);
+        screen.rotation.y = -angle - Math.PI / 4;
+        group.add(screen);
+      }
+      break;
+    }
+    case 'cendrier': {
+      group.add(solid(new THREE.CylinderGeometry(w * 0.5, w * 0.5, 0.025, 16), m.noirMat, 0, 0.0125));
+      group.add(solid(cyl(0.022, h * 0.72, 10), m.inox, 0, h * 0.38));
+      group.add(solid(new THREE.CylinderGeometry(w * 0.42, w * 0.34, h * 0.22, 16), m.inox, 0, h * 0.87));
+      group.add(solid(new THREE.CylinderGeometry(w * 0.3, w * 0.3, 0.02, 16), m.noirMat, 0, h * 0.97));
+      break;
+    }
+    case 'ballon-eclairant': {
+      parametric = true;
+      // Trepied, mat telescopique et ballon diffusant.
+      for (let leg = 0; leg < 3; leg += 1) {
+        const angle = (leg / 3) * Math.PI * 2;
+        const foot = solid(post(0.018, h * 0.28), m.alu, 0, h * 0.12, 0);
+        foot.rotation.z = Math.cos(angle) * 0.55;
+        foot.rotation.x = -Math.sin(angle) * 0.55;
+        group.add(foot);
+      }
+      group.add(solid(cyl(0.03, h * 0.72, 10), m.alu, 0, h * 0.36));
+      const globe = new THREE.Mesh(new THREE.SphereGeometry(w * 0.5, 20, 14), emissive(color || '#ffe6b8', 1.5));
+      globe.position.y = h - w * 0.5;
+      group.add(globe);
+      const glow = new THREE.PointLight(new THREE.Color(color || '#ffe6b8'), 9, Math.max(12, h * 5), 2);
+      glow.position.y = h - w * 0.5;
+      group.add(glow);
+      break;
+    }
+    case 'enrouleur': {
+      const drum = solid(new THREE.CylinderGeometry(w * 0.42, w * 0.42, d * 0.5, 20), m.peinture, 0, h * 0.55);
+      drum.rotation.x = Math.PI / 2;
+      group.add(drum);
+      for (const side of [-1, 1]) {
+        const flange = solid(new THREE.CylinderGeometry(w * 0.48, w * 0.48, 0.02, 20), m.noirMat, 0, h * 0.55, side * d * 0.26);
+        flange.rotation.x = Math.PI / 2;
+        group.add(flange);
+      }
+      // Berceau et poignee.
+      for (const side of [-1, 1]) {
+        group.add(solid(box(0.02, h * 0.55, 0.06), m.metal, side * w * 0.36, h * 0.28));
+      }
+      group.add(solid(box(w * 0.74, 0.03, 0.06), m.metal, 0, h * 0.55));
+      const handle = solid(cyl(0.014, w * 0.5, 8), m.noirMat, 0, h * 0.95);
+      handle.rotation.z = Math.PI / 2;
+      group.add(handle);
+      for (const side of [-1, 1]) group.add(solid(box(0.02, h * 0.4, 0.02), m.metal, side * w * 0.3, h * 0.75));
+      break;
+    }
+    case 'lave-verres': {
+      parametric = true;
+      group.add(solid(roundedBox(w, h * 0.94, d, 0.02), m.inox, 0, h * 0.47));
+      group.add(solid(box(w * 0.82, h * 0.5, 0.02), m.noirMat, 0, h * 0.42, d / 2 + 0.011));
+      group.add(solid(box(w * 0.5, 0.04, 0.03), m.noirMat, 0, h * 0.8, d / 2 + 0.012));
+      for (const [sx, sz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ]) {
+        group.add(solid(cyl(0.02, h * 0.06, 8), m.metal, sx * (w / 2 - 0.05), h * 0.03, sz * (d / 2 - 0.05)));
+      }
+      break;
+    }
+    case 'fontaine-eau': {
+      parametric = true;
+      group.add(solid(roundedBox(w, h * 0.62, d, 0.02), m.peinture, 0, h * 0.31));
+      group.add(solid(roundedBox(w * 0.9, h * 0.34, d * 0.86, 0.02), m.peintureFroide, 0, h * 0.79));
+      // Niche de puisage et deux becs.
+      group.add(solid(box(w * 0.5, h * 0.16, 0.03), m.noirMat, 0, h * 0.72, d * 0.42));
+      for (const side of [-1, 1]) {
+        const spout = solid(cyl(0.008, 0.07, 8), m.inox, side * w * 0.13, h * 0.79, d * 0.38);
+        spout.rotation.x = Math.PI / 2;
+        group.add(spout);
+      }
+      group.add(solid(box(w * 0.44, 0.015, d * 0.2), m.inox, 0, h * 0.62, d * 0.36));
+      break;
+    }
+    case 'chariot-service': {
+      parametric = true;
+      for (let shelf = 0; shelf < 3; shelf += 1) {
+        group.add(solid(roundedBox(w, 0.025, d, 0.008), m.inox, 0, 0.1 + shelf * ((h - 0.16) / 2)));
+      }
+      for (const [sx, sz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ]) {
+        group.add(solid(post(0.014, h - 0.1), m.inox, sx * (w / 2 - 0.03), (h - 0.1) / 2 + 0.1, sz * (d / 2 - 0.03)));
+        const caster = solid(new THREE.CylinderGeometry(0.045, 0.045, 0.025, 12), m.noirMat, sx * (w / 2 - 0.03), 0.045, sz * (d / 2 - 0.03));
+        caster.rotation.z = Math.PI / 2;
+        group.add(caster);
+      }
+      group.add(solid(cyl(0.014, d * 0.9, 8), m.inox, w / 2 - 0.03, h - 0.02));
+      break;
+    }
+    case 'benne-dechets': {
+      parametric = true;
+      const shell = new THREE.MeshStandardMaterial({ color: 0x2f4f3a, roughness: 0.78, metalness: 0.04 });
+      // Cuve legerement tronconique, comme un conteneur roulant.
+      const tub = new THREE.CylinderGeometry(1, 0.86, h * 0.78, 4, 1);
+      tub.rotateY(Math.PI / 4);
+      tub.scale(w * 0.71, 1, d * 0.71);
+      group.add(solid(tub, shell, 0, h * 0.5));
+      group.add(solid(roundedBox(w, h * 0.06, d, 0.02), m.noirMat, 0, h * 0.92));
+      for (const [sx, sz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ]) {
+        const wheel = solid(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 12), m.noirMat, sx * (w / 2 - 0.14), 0.1, sz * (d / 2 - 0.14));
+        wheel.rotation.z = Math.PI / 2;
+        group.add(wheel);
+      }
+      break;
+    }
+    case 'transpalette': {
+      parametric = true;
+      for (const side of [-1, 1]) {
+        group.add(solid(box(w * 0.36, 0.06, d * 0.74), m.peinture, side * w * 0.3, 0.06, -d * 0.06));
+        const roller = solid(new THREE.CylinderGeometry(0.045, 0.045, 0.05, 10), m.noirMat, side * w * 0.3, 0.045, -d * 0.4);
+        roller.rotation.z = Math.PI / 2;
+        group.add(roller);
+      }
+      group.add(solid(box(w, 0.14, d * 0.16), m.peinture, 0, 0.12, d * 0.34));
+      const steer = solid(new THREE.CylinderGeometry(0.08, 0.08, 0.07, 12), m.noirMat, 0, 0.08, d * 0.4);
+      steer.rotation.z = Math.PI / 2;
+      group.add(steer);
+      // Timon incline, comme au repos.
+      const tiller = solid(post(0.026, h * 0.86), m.peinture, 0, h * 0.42, d * 0.46);
+      tiller.rotation.x = -0.22;
+      group.add(tiller);
+      group.add(solid(box(w * 0.5, 0.05, 0.07), m.noirMat, 0, h * 0.84, d * 0.62));
+      break;
+    }
+    case 'poste-secours': {
+      parametric = true;
+      // Tonnelle equipee : quatre pieds, toiture a quatre pans, croix verte.
+      for (const [sx, sz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ]) {
+        group.add(solid(post(0.03, h * 0.78), m.alu, sx * (w / 2 - 0.06), (h * 0.78) / 2, sz * (d / 2 - 0.06)));
+      }
+      const roof = new THREE.Mesh(hipRoof(w, d, h * 0.22, 0), m.toile);
+      roof.position.y = h * 0.78;
+      roof.castShadow = true;
+      group.add(roof);
+      // Bandeau vert signaletique, croix blanche par-dessus : les barres
+      // etaient posees derriere le bandeau, donc invisibles.
+      const banner = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, h * 0.2), emissive('#1fa64a', 0.35));
+      banner.position.set(0, h * 0.66, d / 2 - 0.04);
+      group.add(banner);
+      for (const bar of [
+        [w * 0.16, h * 0.05],
+        [w * 0.055, h * 0.15],
+      ] as [number, number][]) {
+        const stroke = new THREE.Mesh(new THREE.PlaneGeometry(bar[0], bar[1]), emissive('#ffffff', 0.5));
+        stroke.position.set(0, h * 0.66, d / 2 - 0.035);
+        group.add(stroke);
+      }
+      // Lambrequin : la retombee de toile qui fait lire une tonnelle.
+      for (const [ax, az, rot] of [
+        [0, d / 2, 0],
+        [0, -d / 2, Math.PI],
+        [w / 2, 0, -Math.PI / 2],
+        [-w / 2, 0, Math.PI / 2],
+      ] as [number, number, number][]) {
+        const valance = new THREE.Mesh(new THREE.PlaneGeometry(rot === 0 || rot === Math.PI ? w : d, h * 0.09), m.toile);
+        valance.material.side = THREE.DoubleSide;
+        valance.position.set(ax, h * 0.78 - h * 0.045, az);
+        valance.rotation.y = rot;
+        group.add(valance);
+      }
+      // Brancard et table de soins sous l'abri.
+      group.add(solid(roundedBox(w * 0.5, 0.08, d * 0.22, 0.02), m.peintureFroide, -w * 0.18, 0.62, 0));
+      for (const sx of [-1, 1]) {
+        group.add(solid(post(0.02, 0.6), m.metal, -w * 0.18 + sx * w * 0.2, 0.3, 0));
+      }
+      group.add(solid(roundedBox(w * 0.28, 0.04, d * 0.24, 0.01), m.inox, w * 0.26, 0.76, -d * 0.2));
+      break;
+    }
     default: {
       parametric = true;
       const generic = solid(box(1, 1, 1), m.plastique, 0, h / 2);

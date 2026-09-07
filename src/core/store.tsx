@@ -62,6 +62,15 @@ export function migrate(db: Partial<Database>): Database {
     categoryId: product.categoryId ?? null,
     attributes: product.attributes ?? {},
   }));
+
+  // Le catalogue suit la bibliotheque 3D d'une version a l'autre : un objet
+  // ajoute au Studio doit arriver avec sa fiche produit, sinon il se pose dans
+  // la scene sans jamais entrer au devis. On complete, on n'ecrase rien : les
+  // prix et les stocks ajustes par l'utilisateur sont conserves.
+  const known = new Set(merged.products.map((product) => product.id));
+  for (const product of seed.products) {
+    if (!known.has(product.id)) merged.products.push(product);
+  }
   merged.projects = (merged.projects ?? []).map((project) => ({
     ...project,
     categoryId: project.categoryId ?? null,
