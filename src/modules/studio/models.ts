@@ -2027,17 +2027,18 @@ export function buildObject(
     case 'oriflamme': {
       parametric = true;
       group.add(solid(new THREE.CylinderGeometry(d * 0.5, d * 0.5, 0.03, 14), m.noirMat, 0, 0.015));
-      group.add(solid(cyl(0.016, h, 8), m.alu, -w * 0.32, h / 2));
-      // Voile en goutte, legerement gondolee par le vent.
-      const sail = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.62, h * 0.72, 6, 8), m.toile);
+      group.add(solid(cyl(0.016, h, 8), m.alu, -w * 0.46, h / 2));
+      // Voile en goutte, legerement gondolee par le vent. Elle occupe toute la
+      // largeur annoncee, du mat au bord libre.
+      const sail = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, h * 0.72, 6, 8), m.toile);
       const sailPos = sail.geometry.attributes.position;
       for (let index = 0; index < sailPos.count; index += 1) {
-        const t = (sailPos.getX(index) + w * 0.31) / (w * 0.62);
-        sailPos.setZ(index, Math.sin(t * 3.4) * 0.06 * t);
+        const t = (sailPos.getX(index) + w * 0.45) / (w * 0.9);
+        sailPos.setZ(index, Math.sin(t * 3.4) * 0.07 * t);
       }
       sail.geometry.computeVertexNormals();
       sail.material.side = THREE.DoubleSide;
-      sail.position.set(-w * 0.32 + w * 0.31, h * 0.6, 0);
+      sail.position.set(-w * 0.46 + w * 0.45, h * 0.6, 0);
       sail.castShadow = true;
       group.add(sail);
       break;
@@ -2055,17 +2056,17 @@ export function buildObject(
         const sin = Math.sin(angle);
         // Vasque ouverte vers l'exterieur, sur son bras de raccordement.
         const bowl = solid(
-          new THREE.CylinderGeometry(w * 0.16, w * 0.1, h * 0.34, 14, 1, true, Math.PI * 0.25, Math.PI * 1.5),
+          new THREE.CylinderGeometry(w * 0.18, w * 0.11, h * 0.34, 14, 1, true, Math.PI * 0.25, Math.PI * 1.5),
           bowlMat,
-          cos * w * 0.26,
+          cos * w * 0.31,
           h * 0.6,
-          sin * d * 0.26,
+          sin * d * 0.31,
         );
         bowl.rotation.y = -angle;
         bowl.rotation.x = 0.12;
         (bowl.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
         group.add(bowl);
-        group.add(solid(box(w * 0.16, h * 0.05, 0.03), shell, cos * w * 0.12, h * 0.44, sin * d * 0.12));
+        group.add(solid(box(w * 0.2, h * 0.05, 0.03), shell, cos * w * 0.14, h * 0.44, sin * d * 0.14));
         // Cloison de pudeur entre deux postes.
         const screen = solid(box(0.02, h * 0.5, w * 0.24), shell, Math.cos(angle + Math.PI / 4) * w * 0.24, h * 0.62, Math.sin(angle + Math.PI / 4) * d * 0.24);
         screen.rotation.y = -angle - Math.PI / 4;
@@ -2100,11 +2101,13 @@ export function buildObject(
       break;
     }
     case 'enrouleur': {
-      const drum = solid(new THREE.CylinderGeometry(w * 0.42, w * 0.42, d * 0.5, 20), m.peinture, 0, h * 0.55);
+      const drum = solid(new THREE.CylinderGeometry(w * 0.42, w * 0.42, d * 0.7, 20), m.peinture, 0, h * 0.55);
       drum.rotation.x = Math.PI / 2;
       group.add(drum);
       for (const side of [-1, 1]) {
-        const flange = solid(new THREE.CylinderGeometry(w * 0.48, w * 0.48, 0.02, 20), m.noirMat, 0, h * 0.55, side * d * 0.26);
+        // Joues aux extremites du touret : c'est elles qui donnent l'epaisseur
+        // annoncee au catalogue.
+        const flange = solid(new THREE.CylinderGeometry(w * 0.48, w * 0.48, 0.02, 20), m.noirMat, 0, h * 0.55, side * (d / 2 - 0.01));
         flange.rotation.x = Math.PI / 2;
         group.add(flange);
       }
@@ -2164,7 +2167,11 @@ export function buildObject(
         caster.rotation.z = Math.PI / 2;
         group.add(caster);
       }
-      group.add(solid(cyl(0.014, d * 0.9, 8), m.inox, w / 2 - 0.03, h - 0.02));
+      // Poignee de poussee, couchee dans la profondeur : dressee, elle ajoutait
+      // vingt-cinq centimetres a la hauteur du chariot.
+      const push = solid(cyl(0.014, d * 0.9, 8), m.inox, w / 2 - 0.03, h - 0.02);
+      push.rotation.x = Math.PI / 2;
+      group.add(push);
       break;
     }
     case 'benne-dechets': {
