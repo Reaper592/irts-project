@@ -22,6 +22,14 @@ const STATE_LABEL: Record<GearState, { label: string; tone: 'good' | 'warning' |
   reserve: { label: 'Réservé', tone: 'info' },
 };
 
+/** Nombre de mois ecoules depuis une date ISO, ou null si elle est absente. */
+function monthsSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const jours = (Date.now() - new Date(iso).getTime()) / 86400000;
+  if (!Number.isFinite(jours) || jours < 0) return null;
+  return Math.round(jours / 30.44);
+}
+
 function emptyProduct(entity: EntityId): Product {
   return {
     id: uid('prd'),
@@ -599,31 +607,84 @@ function ProductDetail({
           <h3 style={{ marginBottom: 8 }}>Numéros de série</h3>
           {product.serials.length ? (
             <div className="stack-sm">
-              {product.serials.map((serial) => (
-                <div key={serial.id} className="row" style={{ gap: 8, padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
-                  <span className="mono">{serial.serial}</span>
-                  <span className="spacer" />
-                  <select
-                    value={serial.state}
-                    style={{ width: 150 }}
-                    onChange={(event) =>
-                      update((draft) => {
-                        const target = draft.products
-                          .find((entry) => entry.id === productId)
-                          ?.serials.find((entry) => entry.id === serial.id);
-                        if (target) target.state = event.target.value as GearState;
-                        toast('État du matériel mis à jour.', 'succes');
-                      })
-                    }
-                  >
-                    {Object.entries(STATE_LABEL).map(([id, config]) => (
-                      <option key={id} value={id}>
-                        {config.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+              {product.serials.map((serial) => {
+                // Age et derniere revision d'une unite : c'est sur ces deux
+                // chiffres qu'on decide de reparer ou de remplacer, et ils
+                // etaient stockes sans jamais etre affiches.
+                const ageMois = monthsSince(serial.purchaseDate);
+                const revisionMois = monthsSince(serial.lastMaintenance);
+                const aRevoir = revisionMois !== null && revisionMois >= 12;
+                return (
+                  <div key={serial.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="mono">{serial.serial}</span>
+                      {aRevoir ? (
+                        <Badge tone="warning" icon="⚙">
+                          Révision à prévoir
+                        </Badge>
+                      ) : null}
+                      <span className="spacer" />
+                      <select
+                        value={serial.state}
+                        style={{ width: 150 }}
+                        onChange={(event) =>
+                          update((draft) => {
+                            const target = draft.products
+                              .find((entry) => entry.id === productId)
+                              ?.serials.find((entry) => entry.id === serial.id);
+                            if (target) target.state = event.target.value as GearState;
+                            toast('État du matériel mis à jour.', 'succes');
+                          })
+                        }
+                      >
+                        {Object.entries(STATE_LABEL).map(([id, config]) => (
+                          <option key={id} value={id}>
+                            {config.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="row small dim" style={{ gap: 12, marginTop: 3, flexWrap: 'wrap' }}>
+                      {serial.purchaseDate ? (
+                        <span>
+                          Acheté le {formatDate(serial.purchaseDate)}
+                          {ageMois !== null ? ` · ${ageMois} mois` : ''}
+                          {serial.purchasePrice ? ` · ${money0(serial.purchasePrice)}` : ''}
+                        </span>
+                      ) : null}
+                      {serial.lastMaintenance ? (
+                        <span>
+                          Dernière révision {formatDate(serial.lastMaintenance)}
+                          {revisionMois !== null ? ` · il y a ${revisionMois} mois` : ''}
+                        </span>
+                      ) : (
+                        <span>Jamais révisé</span>
+                      )}
+                      {serial.note ? <span>{serial.note}</span> : null}
+                      <span className="spacer" />
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        title="Enregistrer une révision effectuée aujourd’hui"
+                        onClick={() =>
+                          update((draft) => {
+                            const target = draft.products
+                              .find((entry) => entry.id === productId)
+                              ?.serials.find((entry) => entry.id === serial.id);
+                            if (target) {
+                              target.lastMaintenance = today();
+                              if (target.state === 'maintenance') target.state = 'ok';
+                            }
+                            toast(`Révision du ${serial.serial} enregistrée.`, 'succes');
+                          })
+                        }
+                      >
+                        ✓ Révisé aujourd’hui
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <span className="small dim">Pas de suivi unitaire pour cette référence.</span>

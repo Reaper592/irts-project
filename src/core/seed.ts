@@ -342,15 +342,23 @@ export function categoryIdFor(domain: Category['domain'], label: string): string
 /* --------------------------------------------------------------- helpers */
 
 function serials(prefix: string, count: number, price: number, from: string): SerialItem[] {
-  return Array.from({ length: count }, (_, index) => ({
-    id: `sn_${prefix}_${index + 1}`.toLowerCase(),
-    serial: `${prefix}-${String(index + 1).padStart(3, '0')}`,
-    state: index === 0 && count > 3 ? 'maintenance' : 'ok',
-    purchaseDate: from,
-    purchasePrice: price,
-    lastMaintenance: addMonths(from, 6),
-    note: '',
-  }));
+  return Array.from({ length: count }, (_, index) => {
+    // Un parc reel n'est ni achete ni revise le meme jour : les unites entrent
+    // par vagues et passent en revision a tour de role. Sans cet etalement,
+    // toutes les lignes portent le meme avertissement et il ne veut plus rien
+    // dire.
+    const achat = addMonths(from, -(index % 4) * 5);
+    const revision = addMonths(NOW, -((index * 5) % 17));
+    return {
+      id: `sn_${prefix}_${index + 1}`.toLowerCase(),
+      serial: `${prefix}-${String(index + 1).padStart(3, '0')}`,
+      state: index === 0 && count > 3 ? 'maintenance' : 'ok',
+      purchaseDate: achat,
+      purchasePrice: Math.round(price * (1 - (index % 4) * 0.04)),
+      lastMaintenance: revision,
+      note: '',
+    };
+  });
 }
 
 type ProductSeed = Omit<Product, 'id' | 'serials' | 'active' | 'degressive' | 'categoryId' | 'attributes'> & {
