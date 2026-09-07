@@ -270,6 +270,65 @@ const server = createServer(async (request, response) => {
     }
   }
 
+  // Reception d'une demande depuis une page de prospection.
+  //
+  // Le formulaire des pages generees postait dans le localStorage du visiteur :
+  // la demande n'arrivait donc jamais a l'entreprise, alors meme que le
+  // prospect voyait une confirmation. Elle entre desormais dans le pipeline
+  // comme une affaire au stade « nouveau », et les postes connectes la voient
+  // apparaitre sans rechargement.
+  if (pathname === '/api/prospect' && request.method === 'POST') {
+    try {
+      const body = await readBody(request);
+      if (!state.db) return send(response, 409, { erreur: 'base non initialisée' });
+      const texte = (valeur, max = 400) => String(valeur ?? '').slice(0, max).trim();
+      const nom = texte(body.nom, 120);
+      const email = texte(body.email, 160);
+      if (!nom && !email) return send(response, 400, { erreur: 'nom ou e-mail requis' });
+
+      const page = (state.db.landings ?? []).find((entry) => entry.slug === texte(body.page, 120));
+      const maintenant = new Date().toISOString();
+      const affaire = {
+        id: `deal_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        entity: page?.entity ?? state.db.companies?.[0]?.id ?? 'maree-sonore',
+        title: nom ? `Demande de ${nom}` : 'Demande depuis le site',
+        clientId: null,
+        prospectName: nom,
+        contactEmail: email,
+        contactPhone: texte(body.tel, 40),
+        stage: 'nouveau',
+        value: 0,
+        probability: 10,
+        source: 'Site de prospection',
+        owner: '',
+        expectedDate: texte(body.date, 20),
+        nextAction: 'Rappeler le prospect',
+        nextActionDate: maintenant.slice(0, 10),
+        lostReason: '',
+        landingPageId: page?.id ?? null,
+        activities: [
+          {
+            id: `act_${Date.now().toString(36)}`,
+            date: maintenant.slice(0, 10),
+            type: 'note',
+            summary: texte(body.message, 900) || 'Formulaire du site, sans message.',
+            author: 'Site de prospection',
+          },
+        ],
+        createdAt: maintenant.slice(0, 10),
+      };
+
+      state.db.deals = [affaire, ...(state.db.deals ?? [])];
+      state.revision += 1;
+      state.updatedAt = maintenant;
+      persist();
+      broadcast('revision', { revision: state.revision, par: null }, null);
+      return send(response, 200, { recu: true });
+    } catch (error) {
+      return send(response, 400, { erreur: error.message });
+    }
+  }
+
   if (pathname === '/api/flux') {
     clientSeq += 1;
     const id = url.searchParams.get('poste') || `poste_${clientSeq}`;

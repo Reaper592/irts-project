@@ -15,7 +15,7 @@ en mesurer la rentabilité.
 |---|---|
 | **Pilotage** | Chiffre d'affaires glissant contre objectif, marge brute, encours, pipeline pondéré, taux de transformation, occupation du parc, alertes de sur-réservation, échéances et tâches du jour. |
 | **Prospection** | Pipeline en kanban glissé-déposé sur sept étapes, historique d'activité par affaire, entonnoir de conversion, origine des affaires, motifs de perte, création de devis en un clic. |
-| **Site de prospection** | Constructeur de pages d'atterrissage (accroche, services, chiffres, témoignages, FAQ), aperçu en direct, export d'un fichier HTML autonome avec formulaire de capture, versement des demandes reçues dans le pipeline. |
+| **Site de prospection** | Constructeur de pages d'atterrissage (accroche, services, chiffres, témoignages, FAQ), aperçu en direct, export d'un fichier HTML autonome dont le formulaire poste au serveur IRTS : la demande entre au pipeline comme affaire « nouveau » et apparaît sur les postes connectés sans rechargement. |
 | **Clients** | Fiches multi-contacts, conditions négociées (délai, remise, encours autorisé), historique documentaire, chiffre d'affaires et encours par client, export CSV. |
 | **Devis** | Éditeur complet : lignes catalogue, packs, import d'une scène 3D, dégressivité de location, remises ligne et globale, acompte, TVA multi-taux, contrôle de disponibilité en temps réel, rentabilité prévisionnelle, signature, conversion en facture, PDF imprimable. |
 | **Factures & avoirs** | Facturation, règlements partiels, statuts recalculés (partiel, payé, en retard), pénalités de retard au taux légal et indemnité de recouvrement, avoirs, relances planifiées, export comptable CSV. |
@@ -223,6 +223,11 @@ de vider une collection ou de tout réinitialiser.
   sur la réalité du parc.
 - En mode partagé, la base vit sur le poste serveur (`data/irts-db.json`) :
   sauvegardez ce fichier, ou exportez depuis **Paramètres → Données**.
+- Le formulaire d'une page de prospection poste sur `/api/prospect`. Une page
+  exportée puis hébergée ailleurs garde l'adresse absolue du serveur ; si
+  l'envoi échoue malgré tout, la demande reste dans le navigateur du visiteur
+  et la page affiche le téléphone — mieux vaut un appel qu'une demande perdue
+  en silence.
 - Le serveur n'a ni comptes ni mots de passe : il est prévu pour un réseau de
   confiance. Avant toute exposition sur Internet, placez-le derrière une
   authentification et du HTTPS.

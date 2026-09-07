@@ -286,10 +286,15 @@ function sectionHTML(section: LandingPage['sections'][number]): string {
 
 /**
  * Genere une page de prospection autonome (HTML unique, sans dependance).
- * Le formulaire enregistre le prospect en local et affiche une confirmation :
- * il suffit de brancher `endpoint` pour le relier a un back-office.
+ *
+ * Le formulaire poste la demande au serveur IRTS, qui la verse au pipeline
+ * comme une affaire au stade « nouveau ». `endpoint` vaut par defaut l'adresse
+ * du serveur qui sert la page ; pour une page hebergee ailleurs, on passe
+ * l'adresse complete du serveur. Si l'envoi echoue, la demande est conservee
+ * dans le navigateur du visiteur et la page affiche le telephone : mieux vaut
+ * un appel qu'une demande perdue en silence.
  */
-export function renderLandingHTML(page: LandingPage, company: Company): string {
+export function renderLandingHTML(page: LandingPage, company: Company, endpoint = '/api/prospect'): string {
   const theme = PALETTES[page.palette];
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
@@ -370,6 +375,10 @@ export function renderLandingHTML(page: LandingPage, company: Company): string {
       <div class="full"><button type="submit">${esc(page.ctaLabel)}</button></div>
     </form>
     <div class="ok" id="ok">Merci, votre demande est enregistrée. ${esc(company.name)} vous recontacte sous 24 h ouvrées.</div>
+    <div class="ok" id="repli" style="display:none">
+      L’envoi n’a pas abouti. Appelez-nous au <strong>${esc(company.phone)}</strong>
+      ou écrivez à <strong>${esc(company.email)}</strong> — nous reprenons votre demande immédiatement.
+    </div>
   </section>
 
   <footer>
@@ -378,24 +387,32 @@ export function renderLandingHTML(page: LandingPage, company: Company): string {
   </footer>
 </div>
 <script>
-  // Point de branchement back-office : remplacer par un POST vers votre API.
-  var ENDPOINT = '';
+  var ENDPOINT = ${JSON.stringify(endpoint)};
+  function secours(data) {
+    // Filet de securite : la demande reste dans le navigateur du visiteur et
+    // la page invite a telephoner, plutot que de disparaitre sans trace.
+    try {
+      var store = JSON.parse(localStorage.getItem('irts.leads') || '[]');
+      store.push(data);
+      localStorage.setItem('irts.leads', JSON.stringify(store));
+    } catch (error) { /* stockage indisponible */ }
+    var repli = document.getElementById('repli');
+    if (repli) repli.style.display = 'block';
+  }
   document.getElementById('lead-form').addEventListener('submit', function (event) {
     event.preventDefault();
     var data = Object.fromEntries(new FormData(event.target).entries());
     data.page = ${JSON.stringify(page.slug)};
     data.recu = new Date().toISOString();
-    if (ENDPOINT) {
-      fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    } else {
-      try {
-        var store = JSON.parse(localStorage.getItem('irts.leads') || '[]');
-        store.push(data);
-        localStorage.setItem('irts.leads', JSON.stringify(store));
-      } catch (error) { /* stockage indisponible */ }
-    }
     event.target.style.display = 'none';
     document.getElementById('ok').style.display = 'block';
+    fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+      .then(function (reponse) { if (!reponse.ok) secours(data); })
+      .catch(function () { secours(data); });
   });
 </script>
 </body></html>`;

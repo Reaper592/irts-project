@@ -70,7 +70,13 @@ export default function SiteProspection() {
 
   const page = pages.find((entry) => entry.id === pageId) ?? null;
   const company = page ? companyOf(page.entity) : null;
-  const html = useMemo(() => (page && company ? renderLandingHTML(page, company) : ''), [page, company]);
+  // Adresse absolue du serveur IRTS : une page exportee puis hebergee ailleurs
+  // doit continuer a verser ses demandes au pipeline.
+  const endpoint = `${window.location.origin}/api/prospect`;
+  const html = useMemo(
+    () => (page && company ? renderLandingHTML(page, company, endpoint) : ''),
+    [page, company, endpoint],
+  );
 
   const patch = (changes: Partial<LandingPage>) =>
     update((draft) => {
