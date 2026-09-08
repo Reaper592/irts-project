@@ -31,8 +31,20 @@ en mesurer la rentabilité.
 
 ## Démarrer
 
+Sur le poste qui hébergera la base — celui du bureau, allumé pendant les heures
+de travail — **double-cliquez `demarrer.command`** (macOS, Linux) ou
+**`demarrer.bat`** (Windows). La première fois, il installe et construit tout
+seul, ce qui prend une minute ; ensuite il démarre directement et ouvre le
+navigateur.
+
+Le seul prérequis est **Node.js 20 ou plus**, à prendre sur
+[nodejs.org](https://nodejs.org) si l'ordinateur ne l'a pas. Le script le dit et
+donne l'adresse s'il manque.
+
+En ligne de commande, cela revient à :
+
 ```bash
-npm install
+npm install        # la première fois seulement
 npm run build      # construit l'application
 npm start          # sert l'application et la base partagée sur le réseau
 ```
@@ -41,6 +53,40 @@ Le terminal affiche l'adresse à ouvrir, par exemple `http://192.168.1.20:8080`.
 **Chaque ordinateur du réseau ouvre cette adresse : tous travaillent sur la même
 base et voient les modifications des autres en direct.** Sans serveur joignable,
 l'application fonctionne seule sur le poste avec sa base locale.
+
+Pour arrêter : `Ctrl+C`, ou fermez la fenêtre. Les données restent dans
+`data/irts-db.json`.
+
+## Le premier jour
+
+L'application démarre avec un jeu de démonstration cohérent — trois sociétés,
+un catalogue complet, des clients, trente mois d'historique — pour que tout soit
+lisible et manipulable dès la première minute. Voici l'ordre dans lequel le
+remplacer par vos données réelles.
+
+1. **Paramètres → Sociétés.** Vérifiez pour chacune des trois l'identité légale
+   (SIRET, RCS, APE, TVA, capital), l'adresse, l'IBAN, l'assurance, les CGV et
+   le délai de paiement. Ces informations s'impriment sur chaque devis et chaque
+   facture : c'est le seul écran à remplir avant d'émettre le premier document.
+2. **Paramètres → Numérotation.** Réglez les préfixes et le prochain numéro pour
+   reprendre votre série en cours. La numérotation est continue et sans trou,
+   comme l'exige la réglementation.
+3. **Catalogue & parc.** Le catalogue est généré depuis la bibliothèque 3D :
+   les cent vingt-sept références existent déjà avec leur marque, leur modèle et
+   leurs cotes. **Ajustez vos prix, vos stocks et vos coûts d'achat** — les
+   tarifs livrés sont réalistes mais indicatifs. Saisissez ensuite vos numéros
+   de série pour le matériel que vous suivez à l'unité.
+4. **Paramètres → Vider une collection.** Une fois vos données saisies, videz
+   les collections de démonstration dont vous n'avez plus besoin : clients,
+   devis et factures, affaires, charges, projets, scènes. Les sociétés, le
+   catalogue et les catégories restent.
+5. **Clients**, puis votre premier **devis**. Le parcours complet est là :
+   lignes du catalogue, contrôle de disponibilité, signature, conversion en
+   facture, encaissement.
+
+Sauvegardez régulièrement depuis **Paramètres → Données → Exporter la sauvegarde
+complète**, ou copiez `data/irts-db.json` : c'est tout ce qui contient vos
+données.
 
 ```bash
 npm run dev        # serveur de développement (relaie /api vers le serveur)
@@ -205,6 +251,8 @@ terrain, et le bouton **⤓ Poser au sol** rattrape une hauteur saisie à la mai
 ## Structure
 
 ```
+demarrer.command  démarrage en un double-clic (macOS, Linux)
+demarrer.bat      démarrage en un double-clic (Windows)
 server/index.js   serveur de partage réseau et hébergement de l'application
 src/
   core/           modèle de données, calculs métier, magasin, synchronisation,

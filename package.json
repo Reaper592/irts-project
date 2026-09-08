@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "description": "IRTS Suite — ERP multi-entites pour Maree Sonore, MSR (Maree Sonore Rental) et Owlaris",
   "scripts": {
     "dev": "vite",
@@ -11,7 +14,8 @@
     "serve": "npm run build && node server/index.js",
     "preview": "vite preview",
     "lint": "oxlint src server",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "verifier": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {
     "react": "^19.2.8",

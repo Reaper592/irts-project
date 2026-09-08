@@ -371,14 +371,30 @@ server.listen(PORT, HOST, () => {
       if (entry.family === 'IPv4' && !entry.internal) addresses.push(entry.address);
     }
   }
+  const construite = existsSync(join(STATIC_DIR, 'index.html'));
   console.log('');
   console.log('  IRTS Suite — serveur partagé');
   console.log(`  Base de données : ${DB_FILE}`);
-  console.log(`  Application     : ${existsSync(STATIC_DIR) ? STATIC_DIR : 'non construite (npm run build)'}`);
+  console.log(`  Application     : ${construite ? STATIC_DIR : 'NON CONSTRUITE'}`);
   console.log('');
+  if (!construite) {
+    // Sans ce message, le navigateur n'affiche qu'une page vide et rien
+    // n'indique ce qu'il manque.
+    console.log('  ⚠  L’application n’est pas construite : le navigateur afficherait');
+    console.log('     une page vide. Arrêtez ce serveur (Ctrl+C) et lancez :');
+    console.log('');
+    console.log('         npm install     (la première fois seulement)');
+    console.log('         npm run build');
+    console.log('         npm start');
+    console.log('');
+    console.log('     Ou double-cliquez « demarrer.command » (Mac) ou « demarrer.bat » (Windows),');
+    console.log('     qui enchaîne les trois.');
+    console.log('');
+  }
   console.log(`  Sur cette machine : http://localhost:${PORT}`);
   for (const address of addresses) console.log(`  Sur le réseau     : http://${address}:${PORT}`);
   console.log('');
   console.log('  Chaque poste ouvre cette adresse : tous partagent la même base.');
+  console.log('  Pour arrêter : Ctrl+C. Les données restent dans le fichier ci-dessus.');
   console.log('');
 });
