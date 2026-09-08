@@ -1,0 +1,2821 @@
+import type {
+  BusinessDoc,
+  Category,
+  CategoryField,
+  Client,
+  Company,
+  Database,
+  Deal,
+  DocLine,
+  EntityId,
+  Expense,
+  LandingPage,
+  MaintenanceTicket,
+  Pack,
+  Product,
+  Project,
+  Scene,
+  SerialItem,
+  Staff,
+  TaskItem,
+} from './types';
+import { DEFAULT_DEGRESSIVE } from './calc';
+import { OBJECT_LIBRARY, productIdForRef } from '../modules/studio/library';
+import { addDays, addMonths, monthKey, today, uid } from './utils';
+
+const NOW = today();
+
+/* -------------------------------------------------------------- societes */
+
+export const COMPANIES: Company[] = [
+  {
+    id: 'maree-sonore',
+    name: 'Marée Sonore',
+    legalName: 'MARÉE SONORE SAS',
+    tagline: 'Prestation technique son, lumière et scène',
+    activity: 'Prestation & régie technique événementielle',
+    accent: '#3987e5',
+    accentSoft: 'rgba(57,135,229,0.16)',
+    mark: 'MS',
+    siret: '892 415 037 00024',
+    rcs: 'RCS Nantes 892 415 037',
+    ape: '9002Z',
+    vatNumber: 'FR41892415037',
+    capital: 25000,
+    address: "12 quai de la Fosse",
+    zip: '44000',
+    city: 'Nantes',
+    country: 'France',
+    phone: '+33 2 40 12 88 40',
+    email: 'contact@maree-sonore.fr',
+    website: 'www.maree-sonore.fr',
+    iban: 'FR76 3000 4008 2800 0123 4567 890',
+    bic: 'BNPAFRPPXXX',
+    bank: 'BNP Paribas Nantes Centre',
+    insurance: 'RC Pro AXA n° 10442876 — 8 M€',
+    paymentTermsDays: 30,
+    lateFeeRate: 0.1225,
+    recoveryFee: 40,
+    quotePrefix: 'MS-DEV',
+    invoicePrefix: 'MS-FAC',
+    creditPrefix: 'MS-AV',
+    defaultVatRate: 20,
+    quoteValidityDays: 30,
+    cgv:
+      "Acompte de 30 % à la commande, solde à réception de facture. Toute prestation annulée à moins de 7 jours de l'événement est due à 50 %, à moins de 48 h à 100 %. Le matériel reste la propriété de Marée Sonore.",
+  },
+  {
+    id: 'msr',
+    name: 'MSR',
+    legalName: 'MARÉE SONORE RENTAL SAS',
+    tagline: 'Location de parc son, lumière, vidéo et structure',
+    activity: 'Location de matériel événementiel',
+    accent: '#199e70',
+    accentSoft: 'rgba(25,158,112,0.16)',
+    mark: 'MSR',
+    siret: '921 004 552 00017',
+    rcs: 'RCS Nantes 921 004 552',
+    ape: '7739Z',
+    vatNumber: 'FR62921004552',
+    capital: 50000,
+    address: '7 rue des Marchandises — ZA de la Pentecôte',
+    zip: '44860',
+    city: 'Saint-Aignan-de-Grand-Lieu',
+    country: 'France',
+    phone: '+33 2 40 12 88 45',
+    email: 'location@msr-rental.fr',
+    website: 'www.msr-rental.fr',
+    iban: 'FR76 3000 4008 2800 0987 6543 210',
+    bic: 'BNPAFRPPXXX',
+    bank: 'BNP Paribas Nantes Centre',
+    insurance: 'Tous risques matériel Albingia n° 77-A-3391 — 1,2 M€',
+    paymentTermsDays: 30,
+    lateFeeRate: 0.1225,
+    recoveryFee: 40,
+    quotePrefix: 'MSR-DEV',
+    invoicePrefix: 'MSR-FAC',
+    creditPrefix: 'MSR-AV',
+    defaultVatRate: 20,
+    quoteValidityDays: 21,
+    cgv:
+      "Location départ dépôt, retour au plus tard à 12 h le lendemain de la fin de période. Caution ou attestation d'assurance exigée. Le locataire assure le matériel en valeur de remplacement à neuf pendant toute la durée de mise à disposition.",
+  },
+  {
+    id: 'owlaris',
+    name: 'Owlaris',
+    legalName: 'OWLARIS SAS',
+    tagline: "Conception d'environnements immersifs & intégration",
+    activity: 'Ingénierie, conception 3D et intégration audiovisuelle',
+    accent: '#9085e9',
+    accentSoft: 'rgba(144,133,233,0.16)',
+    mark: 'OW',
+    siret: '953 771 208 00013',
+    rcs: 'RCS Nantes 953 771 208',
+    ape: '7112B',
+    vatNumber: 'FR29953771208',
+    capital: 15000,
+    address: '3 allée Baco',
+    zip: '44000',
+    city: 'Nantes',
+    country: 'France',
+    phone: '+33 2 40 12 88 52',
+    email: 'studio@owlaris.io',
+    website: 'www.owlaris.io',
+    iban: 'FR76 1027 8391 0000 0223 4455 667',
+    bic: 'CMCIFR2A',
+    bank: 'Crédit Mutuel Nantes Erdre',
+    insurance: 'RC Pro & décennale MAAF n° 5541203',
+    paymentTermsDays: 45,
+    lateFeeRate: 0.1225,
+    recoveryFee: 40,
+    quotePrefix: 'OW-DEV',
+    invoicePrefix: 'OW-FAC',
+    creditPrefix: 'OW-AV',
+    defaultVatRate: 20,
+    quoteValidityDays: 45,
+    cgv:
+      "Étude et conception facturées à 40 % au lancement, 40 % à la validation de la maquette, solde à la livraison. Les livrables 3D restent la propriété d'Owlaris jusqu'au paiement intégral. Cession des droits d'exploitation à réception du solde.",
+  },
+];
+
+
+/* ------------------------------------------------------------- taxonomie */
+
+function field(
+  label: string,
+  kind: CategoryField['kind'],
+  extra: Partial<CategoryField> = {},
+): CategoryField {
+  return {
+    id: `f_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+    label,
+    kind,
+    options: extra.options ?? [],
+    unit: extra.unit ?? '',
+    defaultValue: extra.defaultValue ?? '',
+    required: extra.required ?? false,
+  };
+}
+
+interface CategorySeed {
+  label: string;
+  color: string;
+  icon: string;
+  entity?: Category['entity'];
+  fields?: CategoryField[];
+  /** Identifiant impose : les charges conservent leurs cles historiques. */
+  id?: string;
+}
+
+function buildCategories(domain: Category['domain'], seeds: CategorySeed[]): Category[] {
+  return seeds.map((seed, index) => ({
+    id: seed.id ?? `cat_${domain}_${seed.label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+    domain,
+    entity: seed.entity ?? 'groupe',
+    label: seed.label,
+    color: seed.color,
+    icon: seed.icon,
+    parentId: null,
+    order: index,
+    fields: seed.fields ?? [],
+    archived: false,
+    notes: '',
+  }));
+}
+
+export const CATEGORIES: Category[] = [
+  ...buildCategories('catalogue', [
+    {
+      label: 'Son — diffusion',
+      color: '#3987e5',
+      icon: '🔊',
+      fields: [field('SPL max', 'nombre', { unit: 'dB' }), field('Directivité', 'texte'), field('Bande passante', 'texte')],
+    },
+    { label: 'Son — retours', color: '#3987e5', icon: '🎚️', fields: [field('SPL max', 'nombre', { unit: 'dB' })] },
+    {
+      label: 'Son — régie',
+      color: '#3987e5',
+      icon: '🎛️',
+      fields: [field('Entrées', 'nombre'), field('Réseau audio', 'liste', { options: ['Dante', 'AES50', 'MADI', 'Aucun'] })],
+    },
+    { label: 'Son — micros', color: '#3987e5', icon: '🎤', fields: [field('Canaux', 'nombre'), field('Bande HF', 'texte')] },
+    { label: 'Son — DJ', color: '#3987e5', icon: '🎧' },
+    {
+      label: 'Lumière — asservis',
+      color: '#c98500',
+      icon: '💡',
+      fields: [field('Source', 'texte'), field('Zoom', 'texte'), field('Puissance', 'nombre', { unit: 'W' })],
+    },
+    { label: 'Lumière — statiques', color: '#c98500', icon: '🔦', fields: [field('Source', 'texte'), field('Indice IP', 'texte')] },
+    { label: 'Lumière — effets', color: '#c98500', icon: '🌫️' },
+    { label: 'Lumière — régie', color: '#c98500', icon: '🎛️', fields: [field('Paramètres', 'nombre')] },
+    {
+      label: 'Vidéo — LED',
+      color: '#d55181',
+      icon: '🟥',
+      fields: [field('Pitch', 'nombre', { unit: 'mm' }), field('Luminosité', 'nombre', { unit: 'nits' })],
+    },
+    { label: 'Vidéo — projection', color: '#d55181', icon: '📽️', fields: [field('Luminosité', 'nombre', { unit: 'lm' })] },
+    {
+      label: 'Structure',
+      color: '#8592a3',
+      icon: '🏗️',
+      fields: [field('Section', 'texte'), field('Charge admissible', 'nombre', { unit: 'kg' })],
+    },
+    {
+      label: 'Mobilier',
+      color: '#9c6b3f',
+      icon: '🪑',
+      fields: [field('Places', 'nombre'), field('Matériau', 'texte')],
+    },
+    {
+      label: 'Tentes & abris',
+      color: '#199e70',
+      icon: '⛺',
+      fields: [
+        field('Surface couverte', 'nombre', { unit: 'm²' }),
+        field('Hauteur sous barre', 'nombre', { unit: 'm' }),
+        field('Résistance au vent', 'texte'),
+      ],
+    },
+    { label: 'Énergie', color: '#e66767', icon: '⚡', fields: [field('Puissance', 'nombre', { unit: 'kVA' })] },
+    { label: 'Logistique', color: '#8592a3', icon: '🚚' },
+    { label: 'Personnel technique', color: '#199e70', icon: '👷', fields: [field('Amplitude', 'texte')] },
+    { label: 'Direction technique', color: '#199e70', icon: '📋' },
+    { label: 'Forfaits', color: '#d95926', icon: '🎁' },
+    { label: 'Ingénierie', color: '#9085e9', icon: '📐' },
+    { label: 'Conception', color: '#9085e9', icon: '🖼️' },
+    { label: 'Intégration', color: '#9085e9', icon: '🔧' },
+    { label: 'Vente matériel', color: '#3987e5', icon: '📦' },
+    { label: 'Récurrent', color: '#008300', icon: '🛡️' },
+  ]),
+
+  ...buildCategories('objet3d', [
+    { label: 'Son', color: '#3987e5', icon: '🔊' },
+    { label: 'Lumière', color: '#c98500', icon: '💡' },
+    { label: 'Vidéo', color: '#d55181', icon: '🟥' },
+    { label: 'Structure & scène', color: '#8592a3', icon: '🏗️' },
+    { label: 'Mobilier & réception', color: '#9c6b3f', icon: '🪑' },
+    { label: 'Tentes & abris', color: '#199e70', icon: '⛺' },
+    { label: 'Décor & extérieur', color: '#008300', icon: '🌳' },
+    { label: 'Énergie & technique', color: '#e66767', icon: '⚡' },
+    { label: 'Échelle & circulation', color: '#b9c3d0', icon: '🚶' },
+  ]),
+
+  ...buildCategories('charge', [
+    { id: 'achat-materiel', label: 'Achat de matériel', color: '#3987e5', icon: '📦' },
+    { id: 'sous-traitance', label: 'Sous-traitance', color: '#d95926', icon: '🤝' },
+    { id: 'transport', label: 'Transport', color: '#199e70', icon: '🚚' },
+    { id: 'carburant', label: 'Carburant', color: '#c98500', icon: '⛽' },
+    { id: 'salaires', label: 'Salaires & charges', color: '#d55181', icon: '👥' },
+    { id: 'loyer', label: 'Loyer', color: '#008300', icon: '🏢' },
+    { id: 'assurance', label: 'Assurance', color: '#9085e9', icon: '🛡️' },
+    { id: 'marketing', label: 'Marketing', color: '#e66767', icon: '📣' },
+    { id: 'logiciels', label: 'Logiciels', color: '#3987e5', icon: '💻' },
+    { id: 'maintenance', label: 'Maintenance', color: '#c98500', icon: '🔧' },
+    { id: 'divers', label: 'Divers', color: '#8592a3', icon: '•' },
+  ]),
+
+  ...buildCategories('source', [
+    { label: 'Site de prospection', color: '#3987e5', icon: '🌐' },
+    { label: 'Recommandation', color: '#199e70', icon: '👍' },
+    { label: 'Réseau pro', color: '#199e70', icon: '🤝' },
+    { label: 'Salon Heavent', color: '#d95926', icon: '🎪' },
+    { label: 'Salon du mariage', color: '#d55181', icon: '💍' },
+    { label: 'Marché public', color: '#9085e9', icon: '🏛️' },
+    { label: 'Appel d’offres', color: '#9085e9', icon: '📄' },
+    { label: 'Veille marchés publics', color: '#9085e9', icon: '🔍' },
+    { label: 'Prospection sortante', color: '#c98500', icon: '📞' },
+    { label: 'Bouche à oreille', color: '#008300', icon: '🗣️' },
+    { label: 'Instagram', color: '#e66767', icon: '📷' },
+  ]),
+
+  ...buildCategories('projet', [
+    { label: 'Festival', color: '#d95926', icon: '🎸' },
+    { label: 'Concert', color: '#3987e5', icon: '🎵' },
+    { label: 'Convention', color: '#9085e9', icon: '🏢' },
+    { label: 'Mariage', color: '#d55181', icon: '💍' },
+    { label: 'Salon', color: '#c98500', icon: '🎪' },
+    { label: 'Intégration', color: '#199e70', icon: '🔧' },
+    { label: 'Résidence', color: '#008300', icon: '📅' },
+  ]),
+
+  ...buildCategories('client', [
+    { label: 'Grand compte', color: '#3987e5', icon: '🏢' },
+    { label: 'PME', color: '#199e70', icon: '🏭' },
+    { label: 'Collectivité', color: '#9085e9', icon: '🏛️' },
+    { label: 'Association', color: '#c98500', icon: '🤝' },
+    { label: 'Particulier', color: '#d55181', icon: '🏠' },
+    { label: 'Prescripteur', color: '#008300', icon: '📣' },
+  ]),
+
+  ...buildCategories('competence', [
+    { label: 'Son façade', color: '#3987e5', icon: '🎚️' },
+    { label: 'Retours', color: '#3987e5', icon: '🔈' },
+    { label: 'Captation', color: '#3987e5', icon: '🎙️' },
+    { label: 'Conception lumière', color: '#c98500', icon: '💡' },
+    { label: 'grandMA3', color: '#c98500', icon: '🎛️' },
+    { label: 'Accroche-levage', color: '#8592a3', icon: '🏗️' },
+    { label: 'Vidéo LED', color: '#d55181', icon: '🟥' },
+    { label: 'Régie générale', color: '#199e70', icon: '📋' },
+    { label: 'Sécurité ERP', color: '#e66767', icon: '🦺' },
+    { label: 'Gestion de parc', color: '#008300', icon: '📦' },
+    { label: 'Électronique', color: '#9085e9', icon: '🔧' },
+    { label: 'Permis C', color: '#8592a3', icon: '🚚' },
+  ]),
+
+  ...buildCategories('etiquette', [
+    { label: 'récurrent', color: '#199e70', icon: '↻' },
+    { label: 'grand compte', color: '#3987e5', icon: '★' },
+    { label: 'saisonnier', color: '#c98500', icon: '☀' },
+    { label: 'à qualifier', color: '#8592a3', icon: '?' },
+    { label: 'marché public', color: '#9085e9', icon: '🏛️' },
+    { label: 'petit ticket', color: '#d55181', icon: '•' },
+  ]),
+];
+
+/** Identifiant de la categorie portant ce libelle dans ce domaine. */
+export function categoryIdFor(domain: Category['domain'], label: string): string | null {
+  return CATEGORIES.find((entry) => entry.domain === domain && entry.label === label)?.id ?? null;
+}
+
+/* --------------------------------------------------------------- helpers */
+
+function serials(prefix: string, count: number, price: number, from: string): SerialItem[] {
+  return Array.from({ length: count }, (_, index) => {
+    // Un parc reel n'est ni achete ni revise le meme jour : les unites entrent
+    // par vagues et passent en revision a tour de role. Sans cet etalement,
+    // toutes les lignes portent le meme avertissement et il ne veut plus rien
+    // dire.
+    const achat = addMonths(from, -(index % 4) * 5);
+    const revision = addMonths(NOW, -((index * 5) % 17));
+    return {
+      id: `sn_${prefix}_${index + 1}`.toLowerCase(),
+      serial: `${prefix}-${String(index + 1).padStart(3, '0')}`,
+      state: index === 0 && count > 3 ? 'maintenance' : 'ok',
+      purchaseDate: achat,
+      purchasePrice: Math.round(price * (1 - (index % 4) * 0.04)),
+      lastMaintenance: revision,
+      note: '',
+    };
+  });
+}
+
+type ProductSeed = Omit<Product, 'id' | 'serials' | 'active' | 'degressive' | 'categoryId' | 'attributes'> & {
+  serialCount?: number;
+  degressive?: Product['degressive'];
+};
+
+function product(seed: ProductSeed): Product {
+  const id = `prd_${seed.ref.toLowerCase().replace(/[^a-z0-9]+/g, '')}`;
+  return {
+    ...seed,
+    id,
+    active: true,
+    categoryId: categoryIdFor('catalogue', seed.category),
+    attributes: {},
+    degressive: seed.degressive ?? DEFAULT_DEGRESSIVE,
+    serials:
+      seed.mode === 'location' && seed.serialCount
+        ? serials(seed.ref, seed.serialCount, seed.cost, addMonths(NOW, -26))
+        : [],
+  };
+}
+
+/* ------------------------------------------------------------- catalogue */
+
+/**
+ * Catalogue : les references materiel sont generees depuis la bibliotheque du
+ * Studio — source unique — puis completees par les prestations et forfaits,
+ * qui n'ont pas de representation 3D.
+ */
+/**
+ * Unites facturees a la piece pour un seul poste : une dalle, un metre de
+ * comptoir, un metre carre de piste, une place assise. Le parc doit en
+ * detenir de quoi monter plusieurs chantiers, pas une seule unite — un mur
+ * LED de 8 x 4 m consomme a lui seul cent vingt-huit dalles.
+ */
+const UNITES_MULTIPLES: Record<string, number> = {
+  dalle: 24,
+  'm²': 16,
+  'mètre linéaire': 12,
+  'module de 1 m': 8,
+  'module de 1,2 m': 8,
+  place: 40,
+  'élément de 2 m': 8,
+  'panneau de 2 m': 8,
+  travée: 6,
+  case: 6,
+  praticable: 8,
+  'guirlande de 10 m': 6,
+  élément: 4,
+  poutre: 6,
+  barrière: 8,
+};
+
+const LIBRARY_PRODUCTS: Product[] = (() => {
+  const seen = new Set<string>();
+  const out: Product[] = [];
+  for (const entry of OBJECT_LIBRARY) {
+    if (!entry.product || seen.has(entry.product.ref)) continue;
+    seen.add(entry.product.ref);
+    const source = entry.product;
+    out.push({
+      id: productIdForRef(source.ref),
+      entity: source.entity,
+      ref: source.ref,
+      name: source.name,
+      brand: source.brand,
+      model: source.model,
+      category: source.category,
+      categoryId: categoryIdFor('catalogue', source.category),
+      attributes: {},
+      mode: source.mode,
+      unit: source.unit,
+      priceDay: source.priceDay,
+      priceSale: source.priceSale,
+      cost: source.cost,
+      vatRate: 20,
+      stock: stockFor(source),
+      weightKg: source.weightKg,
+      powerW: source.powerW,
+      specs: source.specs,
+      degressive: DEFAULT_DEGRESSIVE,
+      mark: entry.icon,
+      model3d: entry.id,
+      serials: serialsFor(source),
+      active: true,
+    });
+  }
+  return out;
+})();
+
+/** Quantite au parc : le petit materiel se compte par centaines, pas a l'unite. */
+function stockFor(source: (typeof OBJECT_LIBRARY)[number]['product']): number {
+  if (!source) return 0;
+  if (source.mode !== 'location') return source.mode === 'vente' ? 20 : 0;
+  const base =
+    source.cost <= 50 ? 400
+    : source.cost <= 150 ? 200
+    : source.cost <= 400 ? 80
+    : source.cost <= 1200 ? 24
+    : source.cost <= 5000 ? 16
+    : source.cost <= 15000 ? 8
+    : 4;
+  // Un tarif eleve traduit ici la valeur d'une seule piece, pas la rarete du
+  // lot : sans ce facteur, le parc affiche des disponibilites negatives des
+  // qu'un devis realiste demande un mur LED ou une piste de danse.
+  return base * (UNITES_MULTIPLES[source.unit] ?? 1);
+}
+
+/** Suivi unitaire : reserve au materiel de valeur, ou il a un sens. */
+function serialsFor(source: (typeof OBJECT_LIBRARY)[number]['product']): SerialItem[] {
+  if (!source || source.mode !== 'location' || source.cost < 900) return [];
+  return serials(source.ref, Math.min(16, stockFor(source)), source.cost, addMonths(NOW, -26));
+}
+
+export const PRODUCTS: Product[] = [
+  ...LIBRARY_PRODUCTS,
+
+  /* ------------------------------------------------------- MSR — logistique */
+  product({
+    entity: 'msr',
+    ref: 'LIVRAISON',
+    name: 'Livraison / reprise Loire-Atlantique',
+    brand: 'MSR',
+    model: '',
+    category: 'Logistique',
+    mode: 'service',
+    unit: 'aller-retour',
+    priceDay: 180,
+    priceSale: 180,
+    cost: 70,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Rayon: '80 km inclus', Supplément: '0,85 €/km au-delà' },
+    mark: '🚚',
+    model3d: null,
+  }),
+  product({
+    entity: 'msr',
+    ref: 'MONTAGE',
+    name: 'Équipe de montage / démontage',
+    brand: 'MSR',
+    model: '',
+    category: 'Logistique',
+    mode: 'service',
+    unit: 'technicien / jour',
+    priceDay: 340,
+    priceSale: 340,
+    cost: 215,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '8 h', 'Heures sup.': '48 €/h' },
+    mark: '👷',
+    model3d: null,
+  }),
+
+  /* -------------------------------------------- Marée Sonore — prestations */
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-FOH',
+    name: 'Ingénieur du son façade',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Personnel technique',
+    mode: 'service',
+    unit: 'journée',
+    priceDay: 420,
+    priceSale: 420,
+    cost: 260,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '10 h', 'Heures sup.': '52 €/h' },
+    mark: '🎚️',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-LIGHT',
+    name: 'Technicien lumière / pupitreur',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Personnel technique',
+    mode: 'service',
+    unit: 'journée',
+    priceDay: 390,
+    priceSale: 390,
+    cost: 240,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '10 h' },
+    mark: '💡',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-BAR',
+    name: 'Personnel de bar / service',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Personnel technique',
+    mode: 'service',
+    unit: 'personne / soirée',
+    priceDay: 260,
+    priceSale: 260,
+    cost: 170,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Amplitude: '8 h', Tenue: 'Fournie' },
+    mark: '🍸',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-REGIE',
+    name: 'Régie générale & coordination technique',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Direction technique',
+    mode: 'service',
+    unit: 'journée',
+    priceDay: 560,
+    priceSale: 560,
+    cost: 330,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Inclus: 'Repérage, plans, sécurité' },
+    mark: '📋',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-MARIAGE',
+    name: 'Sonorisation mariage clé en main',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Forfaits',
+    mode: 'forfait',
+    unit: 'forfait',
+    priceDay: 1850,
+    priceSale: 1850,
+    cost: 720,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: {
+      Inclus: 'Diffusion 200 pers., 2 micros HF, éclairage d’ambiance, technicien',
+      Durée: 'Montage J-1, exploitation jusqu’à 4 h',
+    },
+    mark: '💍',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-GUINGUETTE',
+    name: 'Guinguette clé en main 150 personnes',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Forfaits',
+    mode: 'forfait',
+    unit: 'forfait',
+    priceDay: 4200,
+    priceSale: 4200,
+    cost: 1850,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: {
+      Inclus: 'Tente stretch 10 x 15, bar 4 m, tireuse 2 becs, mobilier 150 places, guirlandes, sono, régie',
+      Montage: 'J-1, démontage J+1',
+    },
+    mark: '🎪',
+    model3d: null,
+  }),
+  product({
+    entity: 'maree-sonore',
+    ref: 'MS-CAPTA',
+    name: 'Captation multipiste & mixage',
+    brand: 'Marée Sonore',
+    model: '',
+    category: 'Forfaits',
+    mode: 'forfait',
+    unit: 'forfait',
+    priceDay: 980,
+    priceSale: 980,
+    cost: 310,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Pistes: '32', Livrable: 'Mix stéréo + stems' },
+    mark: '🎙️',
+    model3d: null,
+  }),
+
+  /* ------------------------------------------------- Owlaris — ingénierie */
+  product({
+    entity: 'owlaris',
+    ref: 'OW-ETUDE',
+    name: 'Étude acoustique & simulation EASE',
+    brand: 'Owlaris',
+    model: '',
+    category: 'Ingénierie',
+    mode: 'service',
+    unit: 'jour d’étude',
+    priceDay: 780,
+    priceSale: 780,
+    cost: 340,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Livrables: 'Cartographie SPL, STI, préconisations' },
+    mark: '📐',
+    model3d: null,
+  }),
+  product({
+    entity: 'owlaris',
+    ref: 'OW-SCENO3D',
+    name: 'Conception scénographique 3D photoréaliste',
+    brand: 'Owlaris',
+    model: 'Studio',
+    category: 'Conception',
+    mode: 'forfait',
+    unit: 'projet',
+    priceDay: 2400,
+    priceSale: 2400,
+    cost: 780,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: {
+      Livrables: '3 vues HD, visite temps réel, plan d’implantation coté',
+      Délai: '5 jours ouvrés',
+    },
+    mark: '🖼️',
+    model3d: null,
+  }),
+  product({
+    entity: 'owlaris',
+    ref: 'OW-INTEG',
+    name: 'Intégration audiovisuelle de salle',
+    brand: 'Owlaris',
+    model: '',
+    category: 'Intégration',
+    mode: 'forfait',
+    unit: 'chantier',
+    priceDay: 6800,
+    priceSale: 6800,
+    cost: 3900,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Inclus: 'Câblage, calibration, formation exploitants' },
+    mark: '🔧',
+    model3d: null,
+  }),
+  product({
+    entity: 'owlaris',
+    ref: 'OW-4030',
+    name: 'Enceinte installation Genelec 4030C (paire)',
+    brand: 'Genelec',
+    model: '4030C',
+    category: 'Vente matériel',
+    mode: 'vente',
+    unit: 'paire',
+    priceDay: 0,
+    priceSale: 1290,
+    cost: 780,
+    vatRate: 20,
+    stock: 14,
+    weightKg: 11,
+    powerW: 100,
+    specs: { SPL: '104 dB', Fixation: 'Support mural inclus' },
+    mark: '🔈',
+    model3d: null,
+  }),
+  product({
+    entity: 'owlaris',
+    ref: 'OW-MAINT',
+    name: 'Contrat de maintenance annuel',
+    brand: 'Owlaris',
+    model: 'Serenity',
+    category: 'Récurrent',
+    mode: 'forfait',
+    unit: 'an',
+    priceDay: 2900,
+    priceSale: 2900,
+    cost: 950,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Inclus: '2 visites/an, hotline 5j/7, pièces < 300 €' },
+    mark: '🛡️',
+    model3d: null,
+  }),
+  product({
+    entity: 'owlaris',
+    ref: 'OW-LICENCE',
+    name: 'Licence Owlaris Stage — visite client 3D',
+    brand: 'Owlaris',
+    model: 'Stage',
+    category: 'Récurrent',
+    mode: 'forfait',
+    unit: 'an / poste',
+    priceDay: 490,
+    priceSale: 490,
+    cost: 60,
+    vatRate: 20,
+    stock: 0,
+    weightKg: 0,
+    powerW: 0,
+    specs: { Inclus: 'Scènes illimitées, partage client, exports HD' },
+    mark: '🦉',
+    model3d: null,
+  }),
+];
+
+const P = (ref: string) => `prd_${ref.toLowerCase().replace(/[^a-z0-9]+/g, '')}`;
+
+export const PACKS: Pack[] = [
+  {
+    id: 'pack_club300',
+    entity: 'msr',
+    name: 'Pack Club 300 personnes',
+    description: 'Diffusion 4 points, 2 subs, console numérique, retours et câblerie.',
+    category: 'Son',
+    lines: [
+      { productId: P('Y10P'), qty: 4 },
+      { productId: P('SB18'), qty: 2 },
+      { productId: P('M32'), qty: 1 },
+      { productId: P('M4'), qty: 2 },
+    ],
+    discountPct: 12,
+    mark: '🎪',
+  },
+  {
+    id: 'pack_scene_festival',
+    entity: 'msr',
+    name: 'Pack Scène Festival 2 000 personnes',
+    description: 'Line array 12 boîtes, 8 subs, console CL5, plateau lumière 24 lyres.',
+    category: 'Son & lumière',
+    lines: [
+      { productId: P('KARA2'), qty: 12 },
+      { productId: P('SB18'), qty: 8 },
+      { productId: P('CL5'), qty: 1 },
+      { productId: P('POINTE'), qty: 16 },
+      { productId: P('MISTRAL'), qty: 8 },
+      { productId: P('GRANDMA3'), qty: 1 },
+      { productId: P('H30V3'), qty: 16 },
+      { productId: P('MT1'), qty: 4 },
+    ],
+    discountPct: 18,
+    mark: '🎸',
+  },
+  {
+    id: 'pack_corporate',
+    entity: 'msr',
+    name: 'Pack Convention d’entreprise',
+    description: 'Diffusion discrète, mur LED 6 x 3 m, micros HF et pupitre.',
+    category: 'Corporate',
+    lines: [
+      { productId: P('Y10P'), qty: 4 },
+      { productId: P('SB18'), qty: 2 },
+      { productId: P('AD4Q'), qty: 1 },
+      { productId: P('ROECB5'), qty: 72 },
+      { productId: P('COLORADO'), qty: 12 },
+      { productId: P('NIVTEC'), qty: 12 },
+    ],
+    discountPct: 15,
+    mark: '🏢',
+  },
+  {
+    id: 'pack_mariage',
+    entity: 'maree-sonore',
+    name: 'Pack Mariage Signature',
+    description: 'Forfait clé en main, régie générale et captation du discours.',
+    category: 'Forfaits',
+    lines: [
+      { productId: P('MS-MARIAGE'), qty: 1 },
+      { productId: P('MS-FOH'), qty: 1 },
+      { productId: P('MS-CAPTA'), qty: 1 },
+    ],
+    discountPct: 8,
+    mark: '💍',
+  },
+  {
+    id: 'pack_owlaris_salle',
+    entity: 'owlaris',
+    name: 'Pack Salle municipale clé en main',
+    description: 'Étude, conception 3D, intégration et première année de maintenance.',
+    category: 'Intégration',
+    lines: [
+      { productId: P('OW-ETUDE'), qty: 3 },
+      { productId: P('OW-SCENO3D'), qty: 1 },
+      { productId: P('OW-INTEG'), qty: 1 },
+      { productId: P('OW-MAINT'), qty: 1 },
+    ],
+    discountPct: 10,
+    mark: '🦉',
+  },
+];
+
+/* ----------------------------------------------------------------- clients */
+
+function contact(name: string, role: string, email: string, phone: string) {
+  return { id: uid('ct'), name, role, email, phone, primary: true };
+}
+
+export const CLIENTS: Client[] = [
+  {
+    id: 'cli_zenith',
+    entity: 'msr',
+    kind: 'pro',
+    name: 'Zénith Nantes Métropole',
+    status: 'actif',
+    contacts: [
+      contact('Camille Renaud', 'Régisseur général', 'c.renaud@zenith-nantes.fr', '+33 2 51 88 20 10'),
+    ],
+    email: 'technique@zenith-nantes.fr',
+    phone: '+33 2 51 88 20 00',
+    address: 'ZAC d’Ar Mor, Rue de Coulvé',
+    zip: '44800',
+    city: 'Saint-Herblain',
+    country: 'France',
+    siret: '384 002 118 00035',
+    vatNumber: 'FR33384002118',
+    source: 'Recommandation',
+    tags: ['salle', 'grand compte', 'récurrent'],
+    discountRate: 8,
+    paymentTermsDays: 45,
+    creditLimit: 80000,
+    rating: 5,
+    notes: 'Facturation centralisée. Bon de commande obligatoire sur chaque devis.',
+    createdAt: addMonths(NOW, -32),
+  },
+  {
+    id: 'cli_stereolux',
+    entity: 'msr',
+    kind: 'association',
+    name: 'Stereolux',
+    status: 'actif',
+    contacts: [contact('Yanis Berthier', 'Directeur technique', 'y.berthier@stereolux.org', '+33 2 40 43 20 30')],
+    email: 'prod@stereolux.org',
+    phone: '+33 2 40 43 20 30',
+    address: '4 boulevard Léon Bureau',
+    zip: '44200',
+    city: 'Nantes',
+    country: 'France',
+    siret: '429 771 003 00028',
+    vatNumber: 'FR76429771003',
+    source: 'Réseau pro',
+    tags: ['musiques actuelles', 'récurrent'],
+    discountRate: 10,
+    paymentTermsDays: 30,
+    creditLimit: 40000,
+    rating: 5,
+    notes: 'Renfort de parc régulier sur les gros plateaux.',
+    createdAt: addMonths(NOW, -28),
+  },
+  {
+    id: 'cli_atlantia',
+    entity: 'msr',
+    kind: 'pro',
+    name: 'Atlantia Congrès La Baule',
+    status: 'actif',
+    contacts: [contact('Sophie Malard', 'Responsable événements', 's.malard@atlantia.fr', '+33 2 40 11 44 20')],
+    email: 'events@atlantia.fr',
+    phone: '+33 2 40 11 44 00',
+    address: 'Avenue Marie-Louise',
+    zip: '44500',
+    city: 'La Baule',
+    country: 'France',
+    siret: '412 887 004 00019',
+    vatNumber: 'FR21412887004',
+    source: 'Salon Heavent',
+    tags: ['congrès', 'corporate'],
+    discountRate: 5,
+    paymentTermsDays: 45,
+    creditLimit: 60000,
+    rating: 4,
+    notes: '',
+    createdAt: addMonths(NOW, -19),
+  },
+  {
+    id: 'cli_hellfest',
+    entity: 'msr',
+    kind: 'pro',
+    name: 'Productions Clisson Live',
+    status: 'actif',
+    contacts: [contact('Marc Tanguy', 'Directeur de production', 'm.tanguy@clissonlive.fr', '+33 2 40 54 12 90')],
+    email: 'prod@clissonlive.fr',
+    phone: '+33 2 40 54 12 90',
+    address: '18 rue de la Vallée',
+    zip: '44190',
+    city: 'Clisson',
+    country: 'France',
+    siret: '503 224 887 00021',
+    vatNumber: 'FR90503224887',
+    source: 'Appel d’offres',
+    tags: ['festival', 'saisonnier'],
+    discountRate: 12,
+    paymentTermsDays: 30,
+    creditLimit: 120000,
+    rating: 4,
+    notes: 'Pic de charge sur juin. Prévoir sous-location complémentaire.',
+    createdAt: addMonths(NOW, -25),
+  },
+  {
+    id: 'cli_lidl',
+    entity: 'msr',
+    kind: 'pro',
+    name: 'Groupe Verdance Retail',
+    status: 'actif',
+    contacts: [contact('Élodie Fournier', 'Communication interne', 'e.fournier@verdance.fr', '+33 1 84 20 55 12')],
+    email: 'evenements@verdance.fr',
+    phone: '+33 1 84 20 55 00',
+    address: '55 avenue de la République',
+    zip: '75011',
+    city: 'Paris',
+    country: 'France',
+    siret: '452 118 990 00047',
+    vatNumber: 'FR14452118990',
+    source: 'Site web',
+    tags: ['corporate', 'national'],
+    discountRate: 0,
+    paymentTermsDays: 60,
+    creditLimit: 50000,
+    rating: 3,
+    notes: 'Paiement à 60 jours fin de mois — surveiller l’encours.',
+    createdAt: addMonths(NOW, -11),
+  },
+  {
+    id: 'cli_mairie_reze',
+    entity: 'maree-sonore',
+    kind: 'collectivite',
+    name: 'Ville de Rezé — Service culturel',
+    status: 'actif',
+    contacts: [contact('Hugo Lemarchand', 'Chargé de mission', 'h.lemarchand@mairie-reze.fr', '+33 2 40 84 43 00')],
+    email: 'culture@mairie-reze.fr',
+    phone: '+33 2 40 84 43 00',
+    address: 'Place Jean-Baptiste Daviais',
+    zip: '44400',
+    city: 'Rezé',
+    country: 'France',
+    siret: '214 401 435 00016',
+    vatNumber: '',
+    source: 'Marché public',
+    tags: ['collectivité', 'marché public'],
+    discountRate: 0,
+    paymentTermsDays: 30,
+    creditLimit: 30000,
+    rating: 4,
+    notes: 'Mandatement Chorus Pro — code service CULT-REZE.',
+    createdAt: addMonths(NOW, -22),
+  },
+  {
+    id: 'cli_chateau',
+    entity: 'maree-sonore',
+    kind: 'pro',
+    name: 'Château de la Roche-Jagu Réceptions',
+    status: 'actif',
+    contacts: [contact('Marion Le Goff', 'Wedding planner', 'marion@rochejagu-receptions.fr', '+33 6 22 41 09 77')],
+    email: 'contact@rochejagu-receptions.fr',
+    phone: '+33 2 96 95 62 35',
+    address: 'Lieu-dit La Roche-Jagu',
+    zip: '22260',
+    city: 'Ploëzal',
+    country: 'France',
+    siret: '831 220 447 00012',
+    vatNumber: 'FR55831220447',
+    source: 'Salon du mariage',
+    tags: ['mariage', 'prescripteur'],
+    discountRate: 5,
+    paymentTermsDays: 15,
+    creditLimit: 20000,
+    rating: 5,
+    notes: 'Apporteur d’affaires : 12 mariages par saison.',
+    createdAt: addMonths(NOW, -16),
+  },
+  {
+    id: 'cli_durand',
+    entity: 'maree-sonore',
+    kind: 'particulier',
+    name: 'Famille Durand-Nowak',
+    status: 'actif',
+    contacts: [contact('Léa Durand', '', 'lea.durand@example.fr', '+33 6 74 22 18 03')],
+    email: 'lea.durand@example.fr',
+    phone: '+33 6 74 22 18 03',
+    address: '9 rue des Tilleuls',
+    zip: '44300',
+    city: 'Nantes',
+    country: 'France',
+    siret: '',
+    vatNumber: '',
+    source: 'Instagram',
+    tags: ['mariage'],
+    discountRate: 0,
+    paymentTermsDays: 0,
+    creditLimit: 5000,
+    rating: 4,
+    notes: 'Mariage 140 convives. Acompte 30 % encaissé.',
+    createdAt: addMonths(NOW, -5),
+  },
+  {
+    id: 'cli_cinema',
+    entity: 'owlaris',
+    kind: 'pro',
+    name: 'Cinéma Le Concorde',
+    status: 'actif',
+    contacts: [contact('Antoine Vasseur', 'Exploitant', 'a.vasseur@leconcorde.fr', '+33 2 40 74 20 15')],
+    email: 'direction@leconcorde.fr',
+    phone: '+33 2 40 74 20 00',
+    address: '79 boulevard de l’Égalité',
+    zip: '44100',
+    city: 'Nantes',
+    country: 'France',
+    siret: '327 660 114 00023',
+    vatNumber: 'FR68327660114',
+    source: 'Recommandation',
+    tags: ['intégration', 'acoustique'],
+    discountRate: 0,
+    paymentTermsDays: 45,
+    creditLimit: 60000,
+    rating: 5,
+    notes: 'Rénovation salle 2 — phase 2 prévue au printemps.',
+    createdAt: addMonths(NOW, -14),
+  },
+  {
+    id: 'cli_cc_erdre',
+    entity: 'owlaris',
+    kind: 'collectivite',
+    name: 'Communauté de communes Erdre & Gesvres',
+    status: 'actif',
+    contacts: [contact('Nadia Benali', 'Directrice des équipements', 'n.benali@cceg.fr', '+33 2 28 02 22 40')],
+    email: 'equipements@cceg.fr',
+    phone: '+33 2 28 02 22 40',
+    address: '1 rue Marie Curie — PA La Grand’Haie',
+    zip: '44119',
+    city: 'Grandchamp-des-Fontaines',
+    country: 'France',
+    siret: '244 400 610 00038',
+    vatNumber: '',
+    source: 'Marché public',
+    tags: ['marché public', 'salle polyvalente'],
+    discountRate: 0,
+    paymentTermsDays: 45,
+    creditLimit: 150000,
+    rating: 4,
+    notes: 'Marché à bons de commande 3 ans, tranche ferme + 2 optionnelles.',
+    createdAt: addMonths(NOW, -9),
+  },
+  {
+    id: 'cli_hotel',
+    entity: 'owlaris',
+    kind: 'pro',
+    name: 'Hôtel Océania Pornic',
+    status: 'prospect',
+    contacts: [contact('Julien Perrot', 'Directeur', 'j.perrot@oceania-pornic.fr', '+33 2 40 82 30 10')],
+    email: 'direction@oceania-pornic.fr',
+    phone: '+33 2 40 82 30 00',
+    address: 'Plage de la Source',
+    zip: '44210',
+    city: 'Pornic',
+    country: 'France',
+    siret: '408 992 331 00014',
+    vatNumber: 'FR76408992331',
+    source: 'Prospection sortante',
+    tags: ['hôtellerie', 'à qualifier'],
+    discountRate: 0,
+    paymentTermsDays: 30,
+    creditLimit: 25000,
+    rating: 3,
+    notes: 'Sonorisation des espaces séminaires + terrasse.',
+    createdAt: addMonths(NOW, -2),
+  },
+  {
+    id: 'cli_brasserie',
+    entity: 'msr',
+    kind: 'pro',
+    name: 'La Brasserie du Port — Le Hangar',
+    status: 'actif',
+    contacts: [contact('Nolwenn Guihard', 'Programmation', 'nolwenn@lehangar-nantes.fr', '+33 6 11 45 78 22')],
+    email: 'contact@lehangar-nantes.fr',
+    phone: '+33 2 40 89 11 22',
+    address: '21 quai des Antilles',
+    zip: '44200',
+    city: 'Nantes',
+    country: 'France',
+    siret: '881 447 200 00011',
+    vatNumber: 'FR39881447200',
+    source: 'Bouche à oreille',
+    tags: ['bar', 'soirées', 'petit ticket'],
+    discountRate: 5,
+    paymentTermsDays: 15,
+    creditLimit: 8000,
+    rating: 3,
+    notes: 'Locations DJ récurrentes le week-end.',
+    createdAt: addMonths(NOW, -7),
+  },
+];
+
+/* -------------------------------------------------------------------- équipe */
+
+export const STAFF: Staff[] = [
+  {
+    id: 'stf_gael',
+    entity: 'maree-sonore',
+    name: 'Gaël Lauwerier',
+    role: 'Directeur — régie générale',
+    status: 'salarie',
+    dailyCost: 340,
+    dailyRate: 560,
+    skills: ['Régie générale', 'Son façade', 'Sécurité ERP'],
+    email: 'gael@maree-sonore.fr',
+    phone: '+33 6 12 45 78 90',
+    active: true,
+  },
+  {
+    id: 'stf_ines',
+    entity: 'msr',
+    name: 'Inès Rocher',
+    role: 'Responsable parc & logistique',
+    status: 'salarie',
+    dailyCost: 260,
+    dailyRate: 420,
+    skills: ['Gestion de parc', 'Préparation', 'Cariste'],
+    email: 'ines@msr-rental.fr',
+    phone: '+33 6 22 31 08 44',
+    active: true,
+  },
+  {
+    id: 'stf_tom',
+    entity: 'maree-sonore',
+    name: 'Tom Aubertin',
+    role: 'Ingénieur du son',
+    status: 'intermittent',
+    dailyCost: 290,
+    dailyRate: 420,
+    skills: ['Son façade', 'Retours', 'Captation'],
+    email: 'tom.aubertin@example.fr',
+    phone: '+33 6 88 12 90 41',
+    active: true,
+  },
+  {
+    id: 'stf_sarah',
+    entity: 'maree-sonore',
+    name: 'Sarah Kessler',
+    role: 'Éclairagiste / pupitreuse',
+    status: 'intermittent',
+    dailyCost: 275,
+    dailyRate: 390,
+    skills: ['grandMA3', 'Conception lumière', 'Accroche'],
+    email: 'sarah.kessler@example.fr',
+    phone: '+33 6 40 77 21 63',
+    active: true,
+  },
+  {
+    id: 'stf_malik',
+    entity: 'msr',
+    name: 'Malik Ferrand',
+    role: 'Technicien de maintenance',
+    status: 'salarie',
+    dailyCost: 230,
+    dailyRate: 340,
+    skills: ['Électronique', 'Réparation HP', 'Contrôle électrique'],
+    email: 'malik@msr-rental.fr',
+    phone: '+33 6 71 04 55 18',
+    active: true,
+  },
+  {
+    id: 'stf_clara',
+    entity: 'owlaris',
+    name: 'Clara Nunes',
+    role: 'Ingénieure acousticienne',
+    status: 'salarie',
+    dailyCost: 380,
+    dailyRate: 780,
+    skills: ['EASE', 'Mesures Smaart', 'Traitement acoustique'],
+    email: 'clara@owlaris.io',
+    phone: '+33 6 33 90 12 07',
+    active: true,
+  },
+  {
+    id: 'stf_victor',
+    entity: 'owlaris',
+    name: 'Victor Amsellem',
+    role: 'Directeur artistique 3D',
+    status: 'salarie',
+    dailyCost: 330,
+    dailyRate: 690,
+    skills: ['Blender', 'Scénographie', 'Rendu temps réel'],
+    email: 'victor@owlaris.io',
+    phone: '+33 6 52 41 88 30',
+    active: true,
+  },
+  {
+    id: 'stf_leo',
+    entity: 'msr',
+    name: 'Léo Marchetti',
+    role: 'Technicien polyvalent',
+    status: 'intermittent',
+    dailyCost: 250,
+    dailyRate: 360,
+    skills: ['Accroche-levage', 'Vidéo LED', 'Câblage'],
+    email: 'leo.marchetti@example.fr',
+    phone: '+33 6 95 33 47 12',
+    active: true,
+  },
+  {
+    id: 'stf_awa',
+    entity: 'maree-sonore',
+    name: 'Awa Diallo',
+    role: 'Chargée de production',
+    status: 'salarie',
+    dailyCost: 240,
+    dailyRate: 380,
+    skills: ['Devis', 'Planning', 'Relation client'],
+    email: 'awa@maree-sonore.fr',
+    phone: '+33 6 18 27 63 55',
+    active: true,
+  },
+  {
+    id: 'stf_bastien',
+    entity: 'msr',
+    name: 'Bastien Corre',
+    role: 'Chauffeur-livreur PL',
+    status: 'freelance',
+    dailyCost: 210,
+    dailyRate: 300,
+    skills: ['Permis C', 'Manutention', 'FIMO'],
+    email: 'bastien.corre@example.fr',
+    phone: '+33 6 60 12 03 74',
+    active: true,
+  },
+];
+
+/* ------------------------------------------------------------------ projets */
+
+export const PROJECTS: Project[] = [
+  {
+    id: 'prj_festival_estuaire',
+    categoryId: categoryIdFor('projet', 'Festival'),
+    entity: 'msr',
+    name: 'Festival Estuaire Sonore — scène principale',
+    clientId: 'cli_hellfest',
+    status: 'confirme',
+    start: addDays(NOW, 34),
+    end: addDays(NOW, 38),
+    venue: 'Parc du Champ de Foire',
+    address: 'Clisson (44190)',
+    budget: 48500,
+    manager: 'Gaël Lauwerier',
+    checklist: [
+      { id: 'ck1', label: 'Plan d’accroche validé par le bureau de contrôle', done: true, owner: 'Sarah Kessler' },
+      { id: 'ck2', label: 'Note de calcul levage', done: true, owner: 'Léo Marchetti' },
+      { id: 'ck3', label: 'Patch et fiche technique artistes', done: false, owner: 'Tom Aubertin' },
+      { id: 'ck4', label: 'Réservation groupe électrogène 60 kVA', done: false, owner: 'Inès Rocher' },
+      { id: 'ck5', label: 'Planning équipes J-1 / J+1', done: false, owner: 'Awa Diallo' },
+    ],
+    notes: 'Montage J-2 à partir de 8 h. Accès camion par la porte sud uniquement.',
+  },
+  {
+    id: 'prj_convention_verdance',
+    categoryId: categoryIdFor('projet', 'Convention'),
+    entity: 'msr',
+    name: 'Convention annuelle Verdance Retail',
+    clientId: 'cli_lidl',
+    status: 'preparation',
+    start: addDays(NOW, 61),
+    end: addDays(NOW, 62),
+    venue: 'Atlantia La Baule',
+    address: 'La Baule (44500)',
+    budget: 27400,
+    manager: 'Awa Diallo',
+    checklist: [
+      { id: 'ck6', label: 'Repérage technique sur site', done: true, owner: 'Gaël Lauwerier' },
+      { id: 'ck7', label: 'Validation du mur LED 6 x 3 m', done: false, owner: 'Victor Amsellem' },
+      { id: 'ck8', label: 'Bon de commande client reçu', done: false, owner: 'Awa Diallo' },
+    ],
+    notes: 'Plénière 700 personnes + 4 ateliers. Interprétation simultanée à prévoir.',
+  },
+  {
+    id: 'prj_mariage_durand',
+    categoryId: categoryIdFor('projet', 'Mariage'),
+    entity: 'maree-sonore',
+    name: 'Mariage Durand-Nowak',
+    clientId: 'cli_durand',
+    status: 'confirme',
+    start: addDays(NOW, 19),
+    end: addDays(NOW, 20),
+    venue: 'Château de la Roche-Jagu',
+    address: 'Ploëzal (22260)',
+    budget: 3900,
+    manager: 'Awa Diallo',
+    checklist: [
+      { id: 'ck9', label: 'Playlist et timing cérémonie', done: true, owner: 'Awa Diallo' },
+      { id: 'ck10', label: 'Repérage extérieur / plan B pluie', done: false, owner: 'Tom Aubertin' },
+    ],
+    notes: 'Cérémonie laïque en extérieur à 16 h, dîner sous orangerie.',
+  },
+  {
+    id: 'prj_concorde_salle2',
+    categoryId: categoryIdFor('projet', 'Intégration'),
+    entity: 'owlaris',
+    name: 'Cinéma Le Concorde — rénovation salle 2',
+    clientId: 'cli_cinema',
+    status: 'en-cours',
+    start: addDays(NOW, -21),
+    end: addDays(NOW, 26),
+    venue: 'Le Concorde',
+    address: 'Nantes (44100)',
+    budget: 41200,
+    manager: 'Clara Nunes',
+    checklist: [
+      { id: 'ck11', label: 'Mesures acoustiques état initial', done: true, owner: 'Clara Nunes' },
+      { id: 'ck12', label: 'Maquette 3D validée par l’exploitant', done: true, owner: 'Victor Amsellem' },
+      { id: 'ck13', label: 'Commande matériel d’intégration', done: true, owner: 'Clara Nunes' },
+      { id: 'ck14', label: 'Câblage et calibration Dolby', done: false, owner: 'Malik Ferrand' },
+      { id: 'ck15', label: 'Formation des exploitants', done: false, owner: 'Clara Nunes' },
+    ],
+    notes: 'Travaux en journée uniquement, salle exploitée le soir.',
+  },
+  {
+    id: 'prj_cceg_polyvalente',
+    categoryId: categoryIdFor('projet', 'Intégration'),
+    entity: 'owlaris',
+    name: 'CCEG — équipement salle polyvalente Treillières',
+    clientId: 'cli_cc_erdre',
+    status: 'preparation',
+    start: addDays(NOW, 75),
+    end: addDays(NOW, 140),
+    venue: 'Salle polyvalente du Bois',
+    address: 'Treillières (44119)',
+    budget: 96000,
+    manager: 'Clara Nunes',
+    checklist: [
+      { id: 'ck16', label: 'Réponse au marché déposée', done: true, owner: 'Clara Nunes' },
+      { id: 'ck17', label: 'Audition de la commission', done: false, owner: 'Gaël Lauwerier' },
+    ],
+    notes: 'Tranche ferme : son + lumière. Tranches optionnelles : vidéo, gradins.',
+  },
+  {
+    id: 'prj_stereolux_saison',
+    categoryId: categoryIdFor('projet', 'Résidence'),
+    entity: 'msr',
+    name: 'Stereolux — renfort de parc saison',
+    clientId: 'cli_stereolux',
+    status: 'en-cours',
+    start: addMonths(NOW, -4),
+    end: addMonths(NOW, 5),
+    venue: 'Stereolux',
+    address: 'Nantes (44200)',
+    budget: 62000,
+    manager: 'Inès Rocher',
+    checklist: [
+      { id: 'ck18', label: 'Contrat cadre signé', done: true, owner: 'Gaël Lauwerier' },
+      { id: 'ck19', label: 'Point de facturation mensuel', done: true, owner: 'Awa Diallo' },
+    ],
+    notes: 'Contrat cadre, facturation mensuelle sur relevé de sorties.',
+  },
+];
+
+/* ------------------------------------------------------------- prospection */
+
+function activity(days: number, type: Activity['type'], summary: string, author: string): Activity {
+  return { id: uid('act'), date: addDays(NOW, -days), type, summary, author };
+}
+type Activity = Deal['activities'][number];
+
+export const DEALS: Deal[] = [
+  {
+    id: 'deal_oceania',
+    entity: 'owlaris',
+    title: 'Sonorisation espaces séminaires & terrasse',
+    clientId: 'cli_hotel',
+    prospectName: 'Hôtel Océania Pornic',
+    contactEmail: 'j.perrot@oceania-pornic.fr',
+    contactPhone: '+33 2 40 82 30 10',
+    stage: 'qualifie',
+    value: 34000,
+    probability: 45,
+    source: 'Prospection sortante',
+    owner: 'Clara Nunes',
+    expectedDate: addDays(NOW, 55),
+    nextAction: 'Envoyer l’étude acoustique préliminaire',
+    nextActionDate: addDays(NOW, 3),
+    lostReason: '',
+    landingPageId: 'lp_owlaris_integration',
+    activities: [
+      activity(21, 'appel', 'Premier contact — besoin identifié sur 4 salles + terrasse.', 'Clara Nunes'),
+      activity(9, 'visite', 'Visite du site, relevés de cotes réalisés.', 'Clara Nunes'),
+      activity(2, 'email', 'Envoi de références comparables (Concorde, CCEG).', 'Clara Nunes'),
+    ],
+    createdAt: addDays(NOW, -24),
+  },
+  {
+    id: 'deal_trentemoult',
+    entity: 'maree-sonore',
+    title: 'Fête de Trentemoult — 3 scènes',
+    clientId: null,
+    prospectName: 'Association Trentemoult en Fête',
+    contactEmail: 'contact@trentemoult-fete.org',
+    contactPhone: '+33 6 84 22 71 30',
+    stage: 'devis',
+    value: 18500,
+    probability: 60,
+    source: 'Site de prospection',
+    owner: 'Awa Diallo',
+    expectedDate: addDays(NOW, 40),
+    nextAction: 'Relancer sur le devis MS-DEV envoyé',
+    nextActionDate: addDays(NOW, 2),
+    lostReason: '',
+    landingPageId: 'lp_ms_prestation',
+    activities: [
+      activity(30, 'email', 'Demande entrante via le formulaire du site.', 'Awa Diallo'),
+      activity(18, 'rdv', 'Réunion de cadrage avec le bureau de l’association.', 'Gaël Lauwerier'),
+      activity(6, 'note', 'Devis 3 scènes transmis, budget serré côté association.', 'Awa Diallo'),
+    ],
+    createdAt: addDays(NOW, -31),
+  },
+  {
+    id: 'deal_biocoop',
+    entity: 'msr',
+    title: 'Séminaire national — mur LED 8 x 4 m',
+    clientId: null,
+    prospectName: 'Coopérative Terra Nova',
+    contactEmail: 'seminaire@terranova-coop.fr',
+    contactPhone: '+33 2 51 72 04 88',
+    stage: 'negociation',
+    value: 26800,
+    probability: 70,
+    source: 'Salon Heavent',
+    owner: 'Inès Rocher',
+    expectedDate: addDays(NOW, 25),
+    nextAction: 'Arbitrage sur la remise volume demandée (-15 %)',
+    nextActionDate: addDays(NOW, 1),
+    lostReason: '',
+    landingPageId: 'lp_msr_parc',
+    activities: [
+      activity(44, 'rdv', 'Rencontre sur le stand Heavent Paris.', 'Inès Rocher'),
+      activity(20, 'email', 'Chiffrage v1 envoyé.', 'Inès Rocher'),
+      activity(4, 'appel', 'Demande de remise volume, concurrence sur le dossier.', 'Inès Rocher'),
+    ],
+    createdAt: addDays(NOW, -46),
+  },
+  {
+    id: 'deal_lycee',
+    entity: 'owlaris',
+    title: 'Auditorium lycée Aristide Briand',
+    clientId: null,
+    prospectName: 'Région Pays de la Loire',
+    contactEmail: 'marches.lycees@paysdelaloire.fr',
+    contactPhone: '+33 2 28 20 50 00',
+    stage: 'contacte',
+    value: 78000,
+    probability: 25,
+    source: 'Veille marchés publics',
+    owner: 'Clara Nunes',
+    expectedDate: addDays(NOW, 120),
+    nextAction: 'Retirer le DCE et vérifier les capacités demandées',
+    nextActionDate: addDays(NOW, 5),
+    lostReason: '',
+    landingPageId: null,
+    activities: [activity(8, 'note', 'Avis de marché repéré sur le BOAMP.', 'Clara Nunes')],
+    createdAt: addDays(NOW, -8),
+  },
+  {
+    id: 'deal_hangar_resid',
+    entity: 'msr',
+    title: 'Résidence DJ mensuelle Le Hangar',
+    clientId: 'cli_brasserie',
+    prospectName: 'La Brasserie du Port',
+    contactEmail: 'nolwenn@lehangar-nantes.fr',
+    contactPhone: '+33 6 11 45 78 22',
+    stage: 'gagne',
+    value: 9600,
+    probability: 100,
+    source: 'Bouche à oreille',
+    owner: 'Inès Rocher',
+    expectedDate: addDays(NOW, -12),
+    nextAction: '',
+    nextActionDate: '',
+    lostReason: '',
+    landingPageId: 'lp_msr_parc',
+    activities: [
+      activity(60, 'appel', 'Demande de location récurrente le samedi.', 'Inès Rocher'),
+      activity(12, 'note', 'Contrat 12 dates signé, facturation mensuelle.', 'Awa Diallo'),
+    ],
+    createdAt: addDays(NOW, -62),
+  },
+  {
+    id: 'deal_mairie_pornic',
+    entity: 'maree-sonore',
+    title: 'Feu d’artifice & scène du 14 juillet',
+    clientId: null,
+    prospectName: 'Ville de Pornic',
+    contactEmail: 'culture@pornic.fr',
+    contactPhone: '+33 2 40 82 31 00',
+    stage: 'perdu',
+    value: 14200,
+    probability: 0,
+    source: 'Marché public',
+    owner: 'Gaël Lauwerier',
+    expectedDate: addDays(NOW, -40),
+    nextAction: '',
+    nextActionDate: '',
+    lostReason: 'Prix — attributaire 11 % moins cher',
+    landingPageId: null,
+    activities: [
+      activity(95, 'email', 'Réponse à consultation déposée.', 'Gaël Lauwerier'),
+      activity(41, 'note', 'Notification de rejet, écart de prix de 11 %.', 'Gaël Lauwerier'),
+    ],
+    createdAt: addDays(NOW, -98),
+  },
+  {
+    id: 'deal_startup',
+    entity: 'owlaris',
+    title: 'Showroom immersif — marque de mobilier',
+    clientId: null,
+    prospectName: 'Atelier Kerlan',
+    contactEmail: 'hello@atelierkerlan.com',
+    contactPhone: '+33 6 09 44 11 27',
+    stage: 'nouveau',
+    value: 21000,
+    probability: 15,
+    source: 'Site de prospection',
+    owner: 'Victor Amsellem',
+    expectedDate: addDays(NOW, 90),
+    nextAction: 'Appel de qualification',
+    nextActionDate: addDays(NOW, 1),
+    lostReason: '',
+    landingPageId: 'lp_owlaris_integration',
+    activities: [activity(1, 'email', 'Formulaire reçu : showroom 240 m², ouverture au printemps.', 'Victor Amsellem')],
+    createdAt: addDays(NOW, -1),
+  },
+];
+
+/* ---------------------------------------------------- documents commerciaux */
+
+/** PRNG deterministe : le jeu de demonstration doit etre identique a chaque lancement. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const rand = mulberry32(20240917);
+const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length) % items.length];
+const between = (min: number, max: number) => min + Math.floor(rand() * (max - min + 1));
+
+function makeLines(refs: { ref: string; qty: number; days?: number }[]): DocLine[] {
+  return refs.map((entry, index) => {
+    const source = PRODUCTS.find((p) => p.id === P(entry.ref));
+    if (!source) throw new Error(`Produit inconnu dans le jeu de demonstration : ${entry.ref}`);
+    return {
+      id: `ln_${uid('l')}_${index}`,
+      productId: source.id,
+      designation: source.name,
+      description: [source.brand, source.model].filter(Boolean).join(' '),
+      qty: entry.qty,
+      days: entry.days ?? 1,
+      unitPrice: source.mode === 'vente' ? source.priceSale : source.priceDay,
+      discountPct: 0,
+      vatRate: source.vatRate,
+      degressive: source.mode === 'location',
+      kind: source.mode,
+    };
+  });
+}
+
+interface DocSeed {
+  entity: EntityId;
+  kind: BusinessDoc['kind'];
+  number: string;
+  clientId: string;
+  title: string;
+  date: string;
+  dueDate: string;
+  status: BusinessDoc['status'];
+  lines: DocLine[];
+  eventStart?: string;
+  eventEnd?: string;
+  venue?: string;
+  projectId?: string | null;
+  dealId?: string | null;
+  sceneId?: string | null;
+  sourceDocId?: string | null;
+  depositPct?: number;
+  globalDiscountPct?: number;
+  shipping?: number;
+  payments?: BusinessDoc['payments'];
+  notes?: string;
+  signedAt?: string | null;
+  signedBy?: string;
+}
+
+function doc(seed: DocSeed): BusinessDoc {
+  const company = COMPANIES.find((c) => c.id === seed.entity)!;
+  return {
+    id: `doc_${seed.number.toLowerCase().replace(/[^a-z0-9]+/g, '')}`,
+    entity: seed.entity,
+    kind: seed.kind,
+    number: seed.number,
+    clientId: seed.clientId,
+    projectId: seed.projectId ?? null,
+    dealId: seed.dealId ?? null,
+    sceneId: seed.sceneId ?? null,
+    sourceDocId: seed.sourceDocId ?? null,
+    title: seed.title,
+    date: seed.date,
+    dueDate: seed.dueDate,
+    status: seed.status,
+    lines: seed.lines,
+    globalDiscountPct: seed.globalDiscountPct ?? 0,
+    depositPct: seed.depositPct ?? 0,
+    shipping: seed.shipping ?? 0,
+    eventStart: seed.eventStart ?? seed.date,
+    eventEnd: seed.eventEnd ?? seed.date,
+    venue: seed.venue ?? '',
+    notes: seed.notes ?? '',
+    terms: company.cgv,
+    payments: seed.payments ?? [],
+    sentAt: seed.status === 'brouillon' ? null : seed.date,
+    signedAt: seed.signedAt ?? null,
+    signedBy: seed.signedBy ?? '',
+    createdAt: seed.date,
+  };
+}
+
+const HERO_DOCS: BusinessDoc[] = [
+  doc({
+    entity: 'msr',
+    kind: 'devis',
+    number: 'MSR-DEV-2026-0147',
+    clientId: 'cli_hellfest',
+    title: 'Festival Estuaire Sonore — scène principale',
+    date: addDays(NOW, -12),
+    dueDate: addDays(NOW, 9),
+    status: 'accepte',
+    projectId: 'prj_festival_estuaire',
+    sceneId: 'scn_festival',
+    eventStart: addDays(NOW, 34),
+    eventEnd: addDays(NOW, 38),
+    venue: 'Parc du Champ de Foire, Clisson',
+    depositPct: 30,
+    globalDiscountPct: 12,
+    shipping: 480,
+    signedAt: addDays(NOW, -6),
+    signedBy: 'Marc Tanguy',
+    notes: 'Montage J-2. Levage sous contrôle du bureau Dekra.',
+    lines: makeLines([
+      { ref: 'KARA2', qty: 12, days: 5 },
+      { ref: 'SB18', qty: 8, days: 5 },
+      { ref: 'CL5', qty: 1, days: 5 },
+      { ref: 'M4', qty: 8, days: 5 },
+      { ref: 'POINTE', qty: 16, days: 5 },
+      { ref: 'MISTRAL', qty: 8, days: 5 },
+      { ref: 'GRANDMA3', qty: 1, days: 5 },
+      { ref: 'H30V3', qty: 16, days: 5 },
+      { ref: 'MT1', qty: 4, days: 5 },
+      { ref: 'GE60', qty: 1, days: 5 },
+    ]),
+  }),
+  doc({
+    entity: 'msr',
+    kind: 'devis',
+    number: 'MSR-DEV-2026-0152',
+    clientId: 'cli_lidl',
+    title: 'Convention annuelle Verdance Retail',
+    date: addDays(NOW, -4),
+    dueDate: addDays(NOW, 17),
+    status: 'envoye',
+    projectId: 'prj_convention_verdance',
+    sceneId: 'scn_convention',
+    eventStart: addDays(NOW, 61),
+    eventEnd: addDays(NOW, 62),
+    venue: 'Atlantia, La Baule',
+    depositPct: 30,
+    shipping: 320,
+    notes: 'Option gradins en attente de validation.',
+    lines: makeLines([
+      { ref: 'Y10P', qty: 6, days: 3 },
+      { ref: 'SB18', qty: 2, days: 3 },
+      { ref: 'M32', qty: 1, days: 3 },
+      { ref: 'AD4Q', qty: 2, days: 3 },
+      { ref: 'ROECB5', qty: 72, days: 3 },
+      { ref: 'COLORADO', qty: 16, days: 3 },
+      { ref: 'NIVTEC', qty: 16, days: 3 },
+      { ref: 'LIVRAISON', qty: 1 },
+    ]),
+  }),
+  doc({
+    entity: 'maree-sonore',
+    kind: 'devis',
+    number: 'MS-DEV-2026-0088',
+    clientId: 'cli_durand',
+    title: 'Mariage Durand-Nowak — Château de la Roche-Jagu',
+    date: addDays(NOW, -26),
+    dueDate: addDays(NOW, 4),
+    status: 'accepte',
+    projectId: 'prj_mariage_durand',
+    sceneId: 'scn_mariage',
+    eventStart: addDays(NOW, 19),
+    eventEnd: addDays(NOW, 20),
+    venue: 'Château de la Roche-Jagu, Ploëzal',
+    depositPct: 30,
+    signedAt: addDays(NOW, -22),
+    signedBy: 'Léa Durand',
+    lines: makeLines([{ ref: 'MS-MARIAGE', qty: 1 }, { ref: 'MS-FOH', qty: 1 }, { ref: 'MS-CAPTA', qty: 1 }]),
+  }),
+  doc({
+    entity: 'maree-sonore',
+    kind: 'devis',
+    number: 'MS-DEV-2026-0091',
+    clientId: 'cli_mairie_reze',
+    title: 'Fête de la musique — parvis de la mairie',
+    date: addDays(NOW, -3),
+    dueDate: addDays(NOW, 27),
+    status: 'brouillon',
+    eventStart: addDays(NOW, 96),
+    eventEnd: addDays(NOW, 96),
+    venue: 'Parvis de la mairie, Rezé',
+    lines: makeLines([{ ref: 'MS-REGIE', qty: 2 }, { ref: 'MS-FOH', qty: 2 }, { ref: 'MS-LIGHT', qty: 2 }]),
+  }),
+  doc({
+    entity: 'owlaris',
+    kind: 'devis',
+    number: 'OW-DEV-2026-0034',
+    clientId: 'cli_cc_erdre',
+    title: 'Équipement salle polyvalente de Treillières — tranche ferme',
+    date: addDays(NOW, -18),
+    dueDate: addDays(NOW, 27),
+    status: 'envoye',
+    projectId: 'prj_cceg_polyvalente',
+    eventStart: addDays(NOW, 75),
+    eventEnd: addDays(NOW, 140),
+    venue: 'Treillières (44119)',
+    depositPct: 40,
+    lines: makeLines([
+      { ref: 'OW-ETUDE', qty: 4 },
+      { ref: 'OW-SCENO3D', qty: 1 },
+      { ref: 'OW-INTEG', qty: 1 },
+      { ref: 'OW-4030', qty: 6 },
+      { ref: 'OW-MAINT', qty: 1 },
+    ]),
+  }),
+  doc({
+    entity: 'owlaris',
+    kind: 'facture',
+    number: 'OW-FAC-2026-0119',
+    clientId: 'cli_cinema',
+    title: 'Le Concorde salle 2 — acompte de lancement',
+    date: addDays(NOW, -21),
+    dueDate: addDays(NOW, 24),
+    status: 'paye',
+    projectId: 'prj_concorde_salle2',
+    depositPct: 0,
+    payments: [
+      { id: 'pay_ow119', date: addDays(NOW, -14), amount: 19776, method: 'virement', reference: 'VIR-CONCORDE-01' },
+    ],
+    lines: makeLines([{ ref: 'OW-ETUDE', qty: 3 }, { ref: 'OW-SCENO3D', qty: 1 }, { ref: 'OW-INTEG', qty: 1 }]).map(
+      (line, index) => (index === 2 ? { ...line, qty: 0.4, designation: `${line.designation} — acompte 40 %` } : line),
+    ),
+  }),
+  doc({
+    entity: 'msr',
+    kind: 'facture',
+    number: 'MSR-FAC-2026-0301',
+    clientId: 'cli_stereolux',
+    title: 'Renfort de parc — relevé mensuel',
+    date: addDays(NOW, -52),
+    dueDate: addDays(NOW, -22),
+    status: 'retard',
+    projectId: 'prj_stereolux_saison',
+    venue: 'Stereolux, Nantes',
+    eventStart: addDays(NOW, -60),
+    eventEnd: addDays(NOW, -53),
+    globalDiscountPct: 10,
+    lines: makeLines([
+      { ref: 'KARA2', qty: 8, days: 4 },
+      { ref: 'SB18', qty: 4, days: 4 },
+      { ref: 'POINTE', qty: 12, days: 4 },
+      { ref: 'MDGATMO', qty: 2, days: 4 },
+    ]),
+    notes: 'Relance 1 envoyée. Relance 2 à programmer.',
+  }),
+  doc({
+    entity: 'msr',
+    kind: 'facture',
+    number: 'MSR-FAC-2026-0318',
+    clientId: 'cli_atlantia',
+    title: 'Congrès régional des notaires — sonorisation plénière',
+    date: addDays(NOW, -33),
+    dueDate: addDays(NOW, 12),
+    status: 'partiel',
+    venue: 'Atlantia, La Baule',
+    eventStart: addDays(NOW, -38),
+    eventEnd: addDays(NOW, -36),
+    payments: [
+      { id: 'pay_msr318', date: addDays(NOW, -20), amount: 4000, method: 'virement', reference: 'VIR-ATL-2291' },
+    ],
+    lines: makeLines([
+      { ref: 'Y10P', qty: 6, days: 3 },
+      { ref: 'SB18', qty: 2, days: 3 },
+      { ref: 'M32', qty: 1, days: 3 },
+      { ref: 'AD4Q', qty: 2, days: 3 },
+      { ref: 'COLORADO', qty: 12, days: 3 },
+      { ref: 'LIVRAISON', qty: 1 },
+    ]),
+  }),
+  doc({
+    entity: 'msr',
+    kind: 'avoir',
+    number: 'MSR-AV-2026-0007',
+    clientId: 'cli_atlantia',
+    title: 'Avoir — dalle LED défectueuse non exploitée',
+    date: addDays(NOW, -30),
+    dueDate: addDays(NOW, -30),
+    status: 'paye',
+    sourceDocId: 'doc_msrfac20260318',
+    lines: makeLines([{ ref: 'ROECB5', qty: 4, days: 3 }]),
+    notes: 'Geste commercial suite à un défaut d’alimentation sur 4 dalles.',
+  }),
+  doc({
+    entity: 'maree-sonore',
+    kind: 'facture',
+    number: 'MS-FAC-2026-0212',
+    clientId: 'cli_chateau',
+    title: 'Saison mariages — juillet',
+    date: addDays(NOW, -9),
+    dueDate: addDays(NOW, 6),
+    status: 'envoye',
+    lines: makeLines([{ ref: 'MS-MARIAGE', qty: 3 }, { ref: 'MS-FOH', qty: 3 }]),
+  }),
+];
+
+/** Historique genere sur 15 mois pour alimenter les graphiques de pilotage. */
+function historicalDocs(): BusinessDoc[] {
+  const out: BusinessDoc[] = [];
+  const recipes: Record<EntityId, { refs: { ref: string; qty: number; days?: number }[]; label: string }[]> = {
+    msr: [
+      { label: 'Location plateau son — soirée privée', refs: [{ ref: 'Y10P', qty: 4, days: 2 }, { ref: 'SB18', qty: 2, days: 2 }, { ref: 'M32', qty: 1, days: 2 }] },
+      { label: 'Location régie DJ week-end', refs: [{ ref: 'CDJ3000', qty: 1, days: 3 }, { ref: 'Y10P', qty: 2, days: 3 }, { ref: 'SB18', qty: 2, days: 3 }] },
+      { label: 'Plateau lumière — concert', refs: [{ ref: 'POINTE', qty: 12, days: 2 }, { ref: 'COLORADO', qty: 16, days: 2 }, { ref: 'H30V3', qty: 8, days: 2 }, { ref: 'MDGATMO', qty: 1, days: 2 }] },
+      { label: 'Mur LED — lancement produit', refs: [{ ref: 'ROECB5', qty: 48, days: 2 }, { ref: 'Y10P', qty: 4, days: 2 }, { ref: 'LIVRAISON', qty: 1 }] },
+      { label: 'Renfort line array — tournée', refs: [{ ref: 'KARA2', qty: 8, days: 4 }, { ref: 'SB18', qty: 6, days: 4 }, { ref: 'CL5', qty: 1, days: 4 }] },
+    ],
+    'maree-sonore': [
+      { label: 'Régie technique — spectacle', refs: [{ ref: 'MS-REGIE', qty: 2 }, { ref: 'MS-FOH', qty: 2 }, { ref: 'MS-LIGHT', qty: 1 }] },
+      { label: 'Mariage clé en main', refs: [{ ref: 'MS-MARIAGE', qty: 1 }, { ref: 'MS-FOH', qty: 1 }] },
+      { label: 'Captation live', refs: [{ ref: 'MS-CAPTA', qty: 1 }, { ref: 'MS-FOH', qty: 1 }] },
+    ],
+    owlaris: [
+      { label: 'Étude acoustique', refs: [{ ref: 'OW-ETUDE', qty: 3 }] },
+      { label: 'Conception 3D & visite client', refs: [{ ref: 'OW-SCENO3D', qty: 1 }, { ref: 'OW-LICENCE', qty: 1 }] },
+      { label: 'Intégration audiovisuelle', refs: [{ ref: 'OW-INTEG', qty: 1 }, { ref: 'OW-4030', qty: 4 }] },
+      { label: 'Maintenance annuelle', refs: [{ ref: 'OW-MAINT', qty: 1 }] },
+    ],
+  };
+  const clientsByEntity: Record<EntityId, string[]> = {
+    msr: ['cli_zenith', 'cli_stereolux', 'cli_atlantia', 'cli_hellfest', 'cli_lidl', 'cli_brasserie'],
+    'maree-sonore': ['cli_mairie_reze', 'cli_chateau', 'cli_durand'],
+    owlaris: ['cli_cinema', 'cli_cc_erdre'],
+  };
+  const volume: Record<EntityId, [number, number]> = {
+    msr: [5, 8],
+    'maree-sonore': [5, 7],
+    owlaris: [2, 4],
+  };
+  let seq: Record<EntityId, number> = { msr: 120, 'maree-sonore': 60, owlaris: 20 };
+  let quoteSeq: Record<EntityId, number> = { msr: 80, 'maree-sonore': 40, owlaris: 12 };
+  const currentDay = Number(NOW.slice(8, 10));
+
+  for (let back = 29; back >= 0; back -= 1) {
+    const anchor = addMonths(NOW, -back);
+    const month = monthKey(anchor);
+    for (const entity of Object.keys(recipes) as EntityId[]) {
+      const company = COMPANIES.find((c) => c.id === entity)!;
+      const [min, max] = volume[entity];
+      const seasonal = ['06', '07', '09', '12'].includes(month.slice(5)) ? 1 : 0;
+      const count = between(min, max) + seasonal;
+      for (let index = 0; index < count; index += 1) {
+        seq = { ...seq, [entity]: seq[entity] + 1 };
+        const recipe = pick(recipes[entity]);
+        const maxDay = back === 0 ? Math.max(1, currentDay - 1) : 26;
+        if (back === 0 && maxDay < 2) continue;
+        const day = String(between(1, maxDay)).padStart(2, '0');
+        const date = `${month}-${day}`;
+        const dueDate = addDays(date, company.paymentTermsDays);
+        const total = 1;
+        const paidLate = rand() < 0.12;
+        const lines = makeLines(recipe.refs).map((line) => ({
+          ...line,
+          qty: Math.max(1, Math.round(line.qty * (0.7 + rand() * 0.7))),
+        }));
+        out.push(
+          doc({
+            entity,
+            kind: 'facture',
+            number: `${company.invoicePrefix}-${month.slice(0, 4)}-${String(seq[entity]).padStart(4, '0')}`,
+            clientId: pick(clientsByEntity[entity]),
+            title: recipe.label,
+            date,
+            dueDate,
+            status: 'paye',
+            eventStart: date,
+            eventEnd: addDays(date, between(0, 3)),
+            globalDiscountPct: rand() < 0.3 ? between(5, 12) : 0,
+            payments: [
+              {
+                id: uid('pay'),
+                date: addDays(dueDate, paidLate ? between(3, 20) : -between(0, 12)),
+                amount: 0,
+                method: 'virement',
+                reference: `VIR-${month.replace('-', '')}-${index + 1}`,
+              },
+            ],
+            lines: lines.slice(0, Math.max(1, Math.round(lines.length * total))),
+          }),
+        );
+
+        // Un devis sur trois est trace : accepte, refuse ou expire, pour que le
+        // taux de transformation affiche une realite commerciale credible.
+        if (rand() < 0.42) {
+          quoteSeq = { ...quoteSeq, [entity]: quoteSeq[entity] + 1 };
+          const roll = rand();
+          const quoteStatus = roll < 0.52 ? 'accepte' : roll < 0.82 ? 'refuse' : 'expire';
+          const quoteDate = addDays(date, -between(8, 30));
+          out.push(
+            doc({
+              entity,
+              kind: 'devis',
+              number: `${company.quotePrefix}-${quoteDate.slice(0, 4)}-${String(quoteSeq[entity]).padStart(4, '0')}`,
+              clientId: pick(clientsByEntity[entity]),
+              title: recipe.label,
+              date: quoteDate,
+              dueDate: addDays(quoteDate, company.quoteValidityDays),
+              status: quoteStatus,
+              eventStart: date,
+              eventEnd: addDays(date, between(0, 3)),
+              depositPct: 30,
+              signedAt: quoteStatus === 'accepte' ? addDays(quoteDate, between(1, 10)) : null,
+              signedBy: quoteStatus === 'accepte' ? 'Service achats' : '',
+              lines,
+            }),
+          );
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ charges */
+
+function expensesSeed(): Expense[] {
+  const out: Expense[] = [];
+  const fixed: { entity: EntityId; label: string; category: Expense['category']; amount: number; vat: number }[] = [
+    { entity: 'msr', label: 'Loyer dépôt ZA de la Pentecôte', category: 'loyer', amount: 2450, vat: 20 },
+    { entity: 'msr', label: 'Assurance tous risques matériel', category: 'assurance', amount: 780, vat: 0 },
+    { entity: 'msr', label: 'Salaires & charges parc', category: 'salaires', amount: 7200, vat: 0 },
+    { entity: 'msr', label: 'Carburant & péages camions', category: 'carburant', amount: 690, vat: 20 },
+    { entity: 'maree-sonore', label: 'Salaires & charges permanents', category: 'salaires', amount: 5200, vat: 0 },
+    { entity: 'maree-sonore', label: 'Loyer bureaux quai de la Fosse', category: 'loyer', amount: 980, vat: 20 },
+    { entity: 'maree-sonore', label: 'Cachets intermittents', category: 'sous-traitance', amount: 2800, vat: 0 },
+    { entity: 'owlaris', label: 'Salaires & charges studio', category: 'salaires', amount: 6400, vat: 0 },
+    { entity: 'owlaris', label: 'Licences logicielles (EASE, suite 3D)', category: 'logiciels', amount: 420, vat: 20 },
+    { entity: 'owlaris', label: 'Coworking Allée Baco', category: 'loyer', amount: 640, vat: 20 },
+  ];
+  const punctual: { entity: EntityId; label: string; category: Expense['category']; min: number; max: number }[] = [
+    { entity: 'msr', label: 'Achat de matériel — renouvellement parc', category: 'achat-materiel', min: 1500, max: 8500 },
+    { entity: 'msr', label: 'Sous-location confrère', category: 'sous-traitance', min: 600, max: 4200 },
+    { entity: 'msr', label: 'Pièces détachées & maintenance', category: 'maintenance', min: 180, max: 1600 },
+    { entity: 'maree-sonore', label: 'Campagne Google Ads mariage', category: 'marketing', min: 250, max: 900 },
+    { entity: 'maree-sonore', label: 'Transport & hébergement équipes', category: 'transport', min: 300, max: 2200 },
+    { entity: 'owlaris', label: 'Achat matériel d’intégration', category: 'achat-materiel', min: 800, max: 6500 },
+    { entity: 'owlaris', label: 'Sous-traitance électricien', category: 'sous-traitance', min: 700, max: 3800 },
+  ];
+
+  for (let back = 29; back >= 0; back -= 1) {
+    const month = monthKey(addMonths(NOW, -back));
+    for (const item of fixed) {
+      out.push({
+        id: uid('exp'),
+        entity: item.entity,
+        date: `${month}-05`,
+        label: item.label,
+        category: item.category,
+        amountHT: Math.round(item.amount * (0.95 + rand() * 0.12)),
+        vatRate: item.vat,
+        supplier: '',
+        projectId: null,
+        method: 'prélèvement',
+        recurring: true,
+      });
+    }
+    for (const item of punctual) {
+      if (rand() > 0.55) continue;
+      out.push({
+        id: uid('exp'),
+        entity: item.entity,
+        date: `${month}-${String(between(6, 27)).padStart(2, '0')}`,
+        label: item.label,
+        category: item.category,
+        amountHT: between(item.min, item.max),
+        vatRate: 20,
+        supplier: pick(['Audiopole', 'Freevox', 'Best Audio', 'Algam Entreprises', 'ESL', 'Nantes Levage']),
+        projectId: null,
+        method: 'virement',
+        recurring: false,
+      });
+    }
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------- maintenance */
+
+export const TICKETS: MaintenanceTicket[] = [
+  {
+    id: 'tk_1',
+    entity: 'msr',
+    productId: P('KARA2'),
+    serialId: 'sn_kara2_1',
+    type: 'curative',
+    status: 'en-cours',
+    openedAt: addDays(NOW, -6),
+    closedAt: null,
+    cost: 480,
+    description: 'Moteur HF droit muet après le festival. Retour SAV L-Acoustics.',
+    technician: 'Malik Ferrand',
+  },
+  {
+    id: 'tk_2',
+    entity: 'msr',
+    productId: P('POINTE'),
+    serialId: 'sn_pointe_1',
+    type: 'curative',
+    status: 'ouvert',
+    openedAt: addDays(NOW, -2),
+    closedAt: null,
+    cost: 0,
+    description: 'Pan bloqué en butée, suspicion de courroie.',
+    technician: 'Malik Ferrand',
+  },
+  {
+    id: 'tk_3',
+    entity: 'msr',
+    productId: P('GE60'),
+    serialId: 'sn_ge60_1',
+    type: 'preventive',
+    status: 'clos',
+    openedAt: addDays(NOW, -48),
+    closedAt: addDays(NOW, -44),
+    cost: 640,
+    description: 'Révision 500 h : filtres, huile, contrôle alternateur.',
+    technician: 'SDMO Services',
+  },
+  {
+    id: 'tk_4',
+    entity: 'msr',
+    productId: P('MT1'),
+    serialId: 'sn_mt1_1',
+    type: 'controle',
+    status: 'clos',
+    openedAt: addDays(NOW, -95),
+    closedAt: addDays(NOW, -95),
+    cost: 890,
+    description: 'Vérification générale périodique levage (VGP) — 8 tours.',
+    technician: 'Dekra',
+  },
+  {
+    id: 'tk_5',
+    entity: 'msr',
+    productId: P('SB18'),
+    serialId: 'sn_sb18_1',
+    type: 'curative',
+    status: 'clos',
+    openedAt: addDays(NOW, -70),
+    closedAt: addDays(NOW, -62),
+    cost: 310,
+    description: 'Remplacement du HP 18" après surcharge.',
+    technician: 'Malik Ferrand',
+  },
+  {
+    id: 'tk_6',
+    entity: 'owlaris',
+    productId: P('OW-4030'),
+    serialId: null,
+    type: 'controle',
+    status: 'ouvert',
+    openedAt: addDays(NOW, -11),
+    closedAt: null,
+    cost: 0,
+    description: 'Contrôle du lot avant livraison CCEG (calibration en usine à vérifier).',
+    technician: 'Clara Nunes',
+  },
+];
+
+/* ------------------------------------------------------- site de prospection */
+
+export const PAGES: LandingPage[] = [
+  {
+    id: 'lp_msr_parc',
+    entity: 'msr',
+    slug: 'location-sono-lumiere-nantes',
+    title: 'MSR — Location son, lumière et vidéo à Nantes',
+    heroTitle: 'Votre parc technique, prêt à partir en 24 h',
+    heroSubtitle:
+      'Line array L-Acoustics, lyres Robe, mur LED ROE, structure Prolyte. Préparation testée, livraison en Loire-Atlantique, assistance technique 7j/7.',
+    ctaLabel: 'Demander un devis en 2 minutes',
+    ctaTarget: 'formulaire',
+    palette: 'maree',
+    published: true,
+    views: 4820,
+    createdAt: addMonths(NOW, -10),
+    sections: [
+      {
+        id: 'sec_msr_1',
+        kind: 'chiffres',
+        title: 'Le parc en chiffres',
+        body: '',
+        items: [
+          '340 références | disponibles au dépôt',
+          '24 h | délai moyen de mise à disposition',
+          '98 % | taux de disponibilité tenu en 2025',
+          '80 km | livraison incluse autour de Nantes',
+        ],
+      },
+      {
+        id: 'sec_msr_2',
+        kind: 'services',
+        title: 'Ce que nous louons',
+        body: '',
+        items: [
+          'Diffusion | Line array Kara II, d&b Y10P, subs SB18',
+          'Lumière | Robe Pointe, Ayrton Mistral, PAR LED, grandMA3',
+          'Vidéo | Dalles LED ROE Carbon 5,77 mm jusqu’à 8 x 4 m',
+          'Structure | Prolyte H30V, tours de levage, praticables Nivtec',
+        ],
+      },
+      {
+        id: 'sec_msr_3',
+        kind: 'temoignages',
+        title: 'Ils nous font confiance',
+        body: '',
+        items: [
+          'Stereolux | « Un parc entretenu et des délais tenus, saison après saison. »',
+          'Atlantia La Baule | « Le seul loueur qui nous livre un plan d’implantation avant le montage. »',
+        ],
+      },
+      {
+        id: 'sec_msr_4',
+        kind: 'faq',
+        title: 'Questions fréquentes',
+        body: '',
+        items: [
+          'Faut-il une caution ? | Une attestation d’assurance en valeur à neuf suffit pour les professionnels.',
+          'Livrez-vous hors 44 ? | Oui, sur devis, à 0,85 €/km au-delà de 80 km.',
+          'Proposez-vous un technicien ? | Oui, via Marée Sonore, notre société de prestation.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'lp_ms_prestation',
+    entity: 'maree-sonore',
+    slug: 'prestation-technique-evenement',
+    title: 'Marée Sonore — Régie technique son & lumière',
+    heroTitle: 'Une équipe technique qui rend votre événement évident',
+    heroSubtitle:
+      'Régie générale, son façade, lumière, captation. Du mariage de 120 convives au festival de 5 000 personnes.',
+    ctaLabel: 'Parler de mon projet',
+    ctaTarget: 'formulaire',
+    palette: 'nuit',
+    published: true,
+    views: 2610,
+    createdAt: addMonths(NOW, -14),
+    sections: [
+      {
+        id: 'sec_ms_1',
+        kind: 'services',
+        title: 'Nos prestations',
+        body: '',
+        items: [
+          'Régie générale | Repérage, plans, sécurité, coordination des corps de métier',
+          'Son | Façade, retours, micros HF, conférence et interprétation',
+          'Lumière | Conception, pupitrage grandMA3, accroche et levage',
+          'Captation | Multipiste 32 pistes, mixage et livraison des stems',
+        ],
+      },
+      {
+        id: 'sec_ms_2',
+        kind: 'chiffres',
+        title: 'Notre saison',
+        body: '',
+        items: ['180 | dates par an', '12 | techniciens mobilisables', '4,9/5 | satisfaction client'],
+      },
+      {
+        id: 'sec_ms_3',
+        kind: 'texte',
+        title: 'Comment nous travaillons',
+        body:
+          'Un interlocuteur unique de la première visite au démontage. Nous produisons un plan d’implantation et une fiche technique avant chaque événement, puis nous en assurons la mise en œuvre avec notre propre parc via MSR.',
+        items: [],
+      },
+    ],
+  },
+  {
+    id: 'lp_owlaris_integration',
+    entity: 'owlaris',
+    slug: 'conception-immersive-integration',
+    title: 'Owlaris — Concevoir avant de construire',
+    heroTitle: 'Voyez votre salle avant qu’elle n’existe',
+    heroSubtitle:
+      'Étude acoustique, maquette 3D photoréaliste et intégration audiovisuelle. Vous validez le rendu, nous livrons l’installation.',
+    ctaLabel: 'Demander une maquette 3D',
+    ctaTarget: 'formulaire',
+    palette: 'ambre',
+    published: true,
+    views: 1340,
+    createdAt: addMonths(NOW, -6),
+    sections: [
+      {
+        id: 'sec_ow_1',
+        kind: 'services',
+        title: 'Le parcours Owlaris',
+        body: '',
+        items: [
+          '1. Étude | Relevés, mesures et simulation EASE de votre espace',
+          '2. Maquette | Environnement 3D temps réel, partagé par simple lien',
+          '3. Intégration | Câblage, calibration et formation de vos équipes',
+          '4. Maintenance | Contrat Serenity, deux visites par an',
+        ],
+      },
+      {
+        id: 'sec_ow_2',
+        kind: 'galerie',
+        title: 'Réalisations',
+        body: '',
+        items: [
+          'Cinéma Le Concorde | Rénovation acoustique et diffusion salle 2',
+          'CCEG Treillières | Salle polyvalente 400 places',
+          'Atelier Kerlan | Showroom immersif 240 m²',
+        ],
+      },
+      {
+        id: 'sec_ow_3',
+        kind: 'faq',
+        title: 'Questions fréquentes',
+        body: '',
+        items: [
+          'Combien de temps pour une maquette ? | 5 jours ouvrés après le relevé.',
+          'Travaillez-vous avec notre installateur ? | Oui, nous fournissons les plans et la calibration.',
+        ],
+      },
+    ],
+  },
+];
+
+/* ---------------------------------------------------------------- scènes 3D */
+
+let sceneItemSeq = 0;
+function item(
+  model3d: string,
+  label: string,
+  x: number,
+  y: number,
+  z: number,
+  extra: Partial<Scene['items'][number]> = {},
+): Scene['items'][number] {
+  sceneItemSeq += 1;
+  return {
+    id: `si_${sceneItemSeq}`,
+    productId: extra.productId ?? null,
+    model3d,
+    label,
+    categoryId: extra.categoryId ?? null,
+    qty: extra.qty ?? 1,
+    x,
+    y,
+    z,
+    rotY: extra.rotY ?? 0,
+    rotX: extra.rotX ?? 0,
+    scale: extra.scale ?? 1,
+    width: extra.width ?? null,
+    height: extra.height ?? null,
+    depth: extra.depth ?? null,
+    color: extra.color ?? '#1b1e24',
+    beam: extra.beam ?? 0,
+    locked: extra.locked ?? false,
+    notes: extra.notes ?? '',
+  };
+}
+
+function lineArrayHang(side: -1 | 1, count: number, productId: string): Scene['items'][number][] {
+  return Array.from({ length: count }, (_, index) =>
+    item('line-array', `Kara II ${side < 0 ? 'G' : 'D'}${index + 1}`, side * 7.5, 8.4 - index * 0.42, -1.5, {
+      productId,
+      rotY: side < 0 ? 0.12 : -0.12,
+    }),
+  );
+}
+
+function row(
+  model3d: string,
+  label: string,
+  count: number,
+  from: number,
+  to: number,
+  y: number,
+  z: number,
+  extra: Partial<Scene['items'][number]> = {},
+): Scene['items'][number][] {
+  return Array.from({ length: count }, (_, index) => {
+    const t = count === 1 ? 0.5 : index / (count - 1);
+    return item(model3d, `${label} ${index + 1}`, from + (to - from) * t, y, z, extra);
+  });
+}
+
+export const SCENES: Scene[] = [
+  {
+    id: 'scn_guinguette',
+    entity: 'maree-sonore',
+    name: 'Guinguette du bord de Loire — 150 couverts',
+    clientId: 'cli_chateau',
+    projectId: null,
+    venueType: 'plein-air',
+    width: 34,
+    depth: 26,
+    height: 6,
+    audience: 150,
+    ambient: 0.34,
+    haze: 0.14,
+    exposure: 1,
+    bloom: 0.42,
+    timeOfDay: 'crepuscule',
+    floorTone: 'gazon-tondu',
+    wallTone: '#15181d',
+    groundShape: 'rectangle',
+    polygon: [],
+    zones: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 250,
+    hiddenFamilies: [],
+    notes:
+      'Guinguette clé en main : tente stretch 10 x 15, bar 4 modules avec tireuse 2 becs, plancha et four à pizza, 150 couverts en tables brasserie, guirlandes guinguette, sanitaires et groupe électrogène.',
+    createdAt: addDays(NOW, -8),
+    items: [
+      // Abri principal et bar
+      item('tente-stretch', 'Tente stretch 10 x 15 m', 0, 0, -1, { productId: P('STRETCH150'), width: 10, height: 4.5, depth: 15 }),
+      item('bar', 'Bar 4 modules', -8.5, 0, 2, { productId: P('BARMOD'), width: 4, rotY: Math.PI / 2 }),
+      item('back-bar', 'Arrière-bar réfrigéré', -10.2, 0, 2, { productId: P('ARRIEREBAR'), rotY: Math.PI / 2 }),
+      item('pompe-biere', 'Tireuse 2 becs', -8.5, 1.15, 1.2, { productId: P('TIREUSE2'), rotY: Math.PI / 2 }),
+      item('fut-biere', 'Fût 30 L', -10, 0, 0.6, { productId: P('FUT30') }),
+      item('fut-biere', 'Fût 30 L', -10, 0, 1.2, { productId: P('FUT30') }),
+      item('frigo-boissons', 'Frigo à boissons', -10.2, 0, 4.2, { productId: P('FRIGO600'), rotY: Math.PI / 2 }),
+      item('machine-glacons', 'Machine à glaçons', -10.2, 0, 5.4, { productId: P('GLACONS60'), rotY: Math.PI / 2 }),
+      item('caisse', 'Poste d’encaissement', -8.5, 1.15, 3.4, { productId: P('CAISSE'), rotY: Math.PI / 2 }),
+      item('auvent-bar', 'Auvent de bar', -9.3, 0, 2, { productId: P('AUVENT'), rotY: Math.PI / 2, width: 6, depth: 2.4 }),
+
+      // Restauration
+      item('plancha', 'Plancha gaz', -8.5, 0, 7.5, { productId: P('PLANCHA') }),
+      item('four-pizza', 'Four à pizza mobile', -6.4, 0, 7.8, { productId: P('FOURPIZZA') }),
+      item('table-inox', 'Table de travail inox', -8.5, 0, 9, { productId: P('TABLEINOX') }),
+      item('plonge', 'Plonge 2 bacs', -6.4, 0, 9.2, { productId: P('PLONGE2') }),
+      item('chambre-froide', 'Chambre froide 6 m³', -13.5, 0, 8.5, { productId: P('CFROIDE6') }),
+
+      // Salle : tables brasserie sous la tente
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, -5.5, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, -2, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('table-brasserie', 'Table brasserie', 3, -3.4, 3.4, 0, 1.5, { productId: P('TBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, -4.6, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, -1.1, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('banc-brasserie', 'Banc', 6, -4.2, 4.2, 0, 2.4, { productId: P('BBRASS'), rotY: Math.PI / 2 }),
+      ...row('cocktail-table', 'Mange-debout', 4, -6, 6, 0, 6.5, { productId: P('MANGEDEBOUT') }),
+
+      // Scène et son
+      ...row('stage-deck', 'Praticable', 4, -3, 3, 0, -10.5, { productId: P('NIVTEC'), width: 2, height: 0.4, depth: 2 }),
+      ...row('top-speaker', 'Enceinte sur pied', 2, -5.5, 5.5, 0, -9, { productId: P('DBY7P') }),
+      item('sub', 'Sub', -4.6, 0, -9.4, { productId: P('SB18') }),
+      item('sub', 'Sub', 4.6, 0, -9.4, { productId: P('SB18') }),
+      item('dj-booth', 'Régie DJ', 0, 0.4, -10.5, { productId: P('CDJ3000') }),
+      ...row('par-led', 'PAR LED', 6, -4.5, 4.5, 3.6, -9.8, { productId: P('COLORADO'), beam: 0.55, color: '#c98500' }),
+
+      // Lumière d’ambiance
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, -6, { productId: P('GUINGUETTE'), width: 10 }),
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, -1, { productId: P('GUINGUETTE'), width: 10 }),
+      item('string-lights', 'Guirlande guinguette', 0, 3.6, 4, { productId: P('GUINGUETTE'), width: 10 }),
+      item('fanions', 'Guirlande de fanions', 0, 3.2, 7.6, { productId: P('FANIONS'), width: 12 }),
+      ...row('uplight', 'Uplight', 4, -6, 6, 0, -7.5, { productId: P('UPLIGHT'), beam: 0.6, color: '#d55181' }),
+      item('mirror-ball', 'Boule à facettes', 0, 3.9, -3, { productId: P('BOULE50') }),
+
+      // Confort, décor, sécurité
+      ...row('parasol-chauffant', 'Parasol chauffant', 2, -7.5, 7.5, 0, 5, { productId: P('CHAUFFANT') }),
+      item('brasero', 'Brasero', 8.5, 0, 8.5, { productId: P('BRASERO') }),
+      ...row('plante', 'Plante', 4, -9, 9, 0, 9.5, { productId: P('PLANTE') }),
+      item('arbre', 'Arbre existant', 13, 0, -6, { width: 5, height: 7, depth: 5 }),
+      item('arbre', 'Arbre existant', 15, 0, 5, { width: 4.5, height: 6, depth: 4.5 }),
+      ...row('barrier', 'Barrière Vauban', 4, -14, 14, 0, 12.5, { productId: P('VAUBAN'), width: 6 }),
+      item('panneau', 'Signalétique entrée', 12, 0, 10, { productId: P('PANNEAU') }),
+      item('extincteur', 'Extincteur', -7.6, 0, 6.2, { productId: P('EXTINCTEUR') }),
+
+      // Sanitaires et logistique
+      ...row('wc-mobile', 'WC autonome', 3, 10.5, 13.5, 0, -9, { productId: P('WCAUTO') }),
+      item('wc-pmr', 'WC PMR', 13.5, 0, -6.5, { productId: P('WCPMR') }),
+      item('bloc-lavabo', 'Bloc lavabo', 10.5, 0, -6.5, { productId: P('LAVABO4') }),
+      item('groupe-electrogene', 'Groupe électrogène 60 kVA', -14, 0, -9, { productId: P('GE60'), rotY: Math.PI / 2 }),
+      item('coffret-electrique', 'Coffret 63 A', -12, 0, -7, { productId: P('COFFRET63') }),
+      item('cable-ramp', 'Passage de câbles', -11, 0, -3, { productId: P('PASSECABLE'), width: 6, rotY: Math.PI / 2 }),
+      item('container-stockage', 'Container de stockage', 14, 0, 0, { productId: P('CONTAINER20'), rotY: Math.PI / 2 }),
+      item('remorque', 'Remorque bâchée', 11, 0, 4, { productId: P('REMORQUE') }),
+      ...row('bin', 'Poubelle de tri', 3, 5, 8, 0, 9, { productId: P('POUBELLE') }),
+    ],
+  },
+  {
+    id: 'scn_festival',
+    entity: 'msr',
+    name: 'Estuaire Sonore — scène principale',
+    clientId: 'cli_hellfest',
+    projectId: 'prj_festival_estuaire',
+    venueType: 'plein-air',
+    width: 34,
+    depth: 26,
+    height: 12,
+    audience: 2000,
+    ambient: 0.18,
+    haze: 0.45,
+    exposure: 1.05,
+    bloom: 0.55,
+    timeOfDay: 'nuit',
+    floorTone: 'gazon-tondu',
+    wallTone: '#0b0d12',
+    groundShape: 'rectangle',
+    polygon: [],
+    zones: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
+    hiddenFamilies: [],
+    notes: 'Ouverture de scène 14 m, hauteur sous grill 9 m. Line array 6 boîtes par côté.',
+    createdAt: addDays(NOW, -12),
+    items: [
+      ...lineArrayHang(-1, 6, P('KARA2')),
+      ...lineArrayHang(1, 6, P('KARA2')),
+      ...row('sub', 'SB18', 8, -6.5, 6.5, 0.45, 1.2, { productId: P('SB18') }),
+      ...row('stage-deck', 'Praticable', 8, -6.5, 6.5, 0, -3, { productId: P('NIVTEC'), scale: 1.6 }),
+      ...row('truss', 'Pont face', 6, -7, 7, 9, -1, { productId: P('H30V3') }),
+      ...row('truss-tower', 'Tour levage', 4, -8.2, 8.2, 0, -1, { productId: P('MT1') }),
+      ...row('moving-head', 'Pointe face', 8, -6.6, 6.6, 8.6, -1, { productId: P('POINTE'), beam: 0.9, color: '#3987e5' }),
+      ...row('moving-head', 'Mistral contre', 6, -5.5, 5.5, 8.6, -6, { productId: P('MISTRAL'), beam: 0.75, color: '#d95926' }),
+      ...row('par-led', 'PAR sol', 10, -6.5, 6.5, 0.9, -6.5, { productId: P('COLORADO'), beam: 0.5, color: '#9085e9' }),
+      ...row('blinder', 'Blinder', 4, -4.5, 4.5, 7.2, -2.5, { productId: P('BLINDER'), beam: 0.4, color: '#c98500' }),
+      ...row('monitor', 'Retour', 6, -5.5, 5.5, 0.9, -3.4, { productId: P('M4') }),
+      item('console', 'Régie façade CL5', 0, 0, 14, { productId: P('CL5') }),
+      item('haze', 'Brouillard', -6, 0.4, -5.5, { productId: P('MDGATMO') }),
+      item('haze', 'Brouillard', 6, 0.4, -5.5, { productId: P('MDGATMO') }),
+      item('led-wall', 'Mur LED fond de scène', 0, 4.6, -7.6, { productId: P('ROECB5'), qty: 96, scale: 1 }),
+    ],
+  },
+  {
+    id: 'scn_convention',
+    entity: 'msr',
+    name: 'Convention Verdance — plénière Atlantia',
+    clientId: 'cli_lidl',
+    projectId: 'prj_convention_verdance',
+    venueType: 'salle',
+    width: 26,
+    depth: 22,
+    height: 8,
+    audience: 700,
+    ambient: 0.4,
+    haze: 0.18,
+    exposure: 1,
+    bloom: 0.3,
+    timeOfDay: 'nuit',
+    floorTone: 'moquette',
+    wallTone: '#15181d',
+    groundShape: 'rectangle',
+    polygon: [],
+    zones: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
+    hiddenFamilies: [],
+    notes: 'Plénière assise 700 personnes, mur LED 6 x 3 m, pupitre côté jardin.',
+    createdAt: addDays(NOW, -4),
+    items: [
+      ...row('top-speaker', 'Y10P façade', 4, -6.5, 6.5, 3.4, 1, { productId: P('Y10P') }),
+      ...row('sub', 'SB18', 2, -5, 5, 0.45, 1.4, { productId: P('SB18') }),
+      ...row('stage-deck', 'Praticable', 6, -5, 5, 0, -2.5, { productId: P('NIVTEC'), scale: 1.6 }),
+      ...row('par-led', 'PAR scène', 8, -5.5, 5.5, 5.4, -1, { productId: P('COLORADO'), beam: 0.6, color: '#c98500' }),
+      ...row('truss', 'Pont', 4, -5.5, 5.5, 5.8, -1, { productId: P('H30V3') }),
+      item('led-wall', 'Mur LED 6 x 3 m', 0, 3.2, -5.4, { productId: P('ROECB5'), qty: 72 }),
+      item('console', 'Régie M32', 8.5, 0, 8, { productId: P('M32') }),
+      item('lectern', 'Pupitre orateur', -3.4, 0.6, -1.4),
+      item('seating-block', 'Jauge assise — 420 places', 0, 0, 6.5, { qty: 420 }),
+    ],
+  },
+  {
+    id: 'scn_mariage',
+    entity: 'maree-sonore',
+    name: 'Mariage Durand-Nowak — orangerie',
+    clientId: 'cli_durand',
+    projectId: 'prj_mariage_durand',
+    venueType: 'salle',
+    width: 18,
+    depth: 16,
+    height: 6,
+    audience: 140,
+    ambient: 0.3,
+    haze: 0.12,
+    exposure: 1.15,
+    bloom: 0.42,
+    timeOfDay: 'nuit',
+    floorTone: 'parquet',
+    wallTone: '#1c1a18',
+    groundShape: 'rectangle',
+    polygon: [],
+    zones: [],
+    gridSnap: 0.25,
+    showGrid: true,
+    quality: 'equilibre',
+    sunAzimuth: 135,
+    hiddenFamilies: [],
+    notes: 'Cérémonie 16 h en extérieur, dîner et soirée dansante sous orangerie.',
+    createdAt: addDays(NOW, -26),
+    items: [
+      ...row('top-speaker', 'Diffusion', 2, -5, 5, 2.2, 0, { productId: P('Y10P') }),
+      ...row('sub', 'Sub', 2, -3.2, 3.2, 0.45, -0.4, { productId: P('SB18') }),
+      item('dj-booth', 'Régie DJ', 0, 0, -3.2, { productId: P('CDJ3000') }),
+      ...row('par-led', 'Ambiance murale', 8, -7, 7, 2.6, -6.5, { productId: P('COLORADO'), beam: 0.45, color: '#d55181' }),
+      ...row('moving-head', 'Lyre piste', 4, -3.5, 3.5, 4.4, -2, { productId: P('MISTRAL'), beam: 0.6, color: '#9085e9' }),
+      ...row('table-round', 'Table', 4, -5.5, 5.5, 0, 3),
+      ...row('table-round', 'Table', 4, -5.5, 5.5, 0, 5.8),
+      item('bar', 'Bar', 6.4, 0, -1, {}),
+      item('haze', 'Brouillard', -4, 0.4, -4, { productId: P('MDGATMO') }),
+    ],
+  },
+];
+
+/* ------------------------------------------------------------------- tâches */
+
+export const TASKS: TaskItem[] = [
+  {
+    id: 'tsk_1',
+    entity: 'msr',
+    label: 'Relancer Stereolux sur la facture MSR-FAC-2026-0301',
+    detail: 'Retard de 22 jours. Relance 2 par courriel puis appel au directeur technique.',
+    due: addDays(NOW, 1),
+    done: false,
+    priority: 'haute',
+    owner: 'Awa Diallo',
+    linkKind: 'facture',
+    linkId: 'doc_msrfac20260301',
+  },
+  {
+    id: 'tsk_2',
+    entity: 'msr',
+    label: 'Arbitrer la remise Terra Nova (-15 % demandés)',
+    detail: 'Marge nette à 22 % au tarif actuel. Proposer -9 % + livraison offerte.',
+    due: addDays(NOW, 1),
+    done: false,
+    priority: 'haute',
+    owner: 'Inès Rocher',
+    linkKind: 'lead',
+    linkId: 'deal_biocoop',
+  },
+  {
+    id: 'tsk_3',
+    entity: 'maree-sonore',
+    label: 'Relance devis Trentemoult en Fête',
+    detail: 'Devis envoyé il y a 6 jours, décision du bureau attendue.',
+    due: addDays(NOW, 2),
+    done: false,
+    priority: 'normale',
+    owner: 'Awa Diallo',
+    linkKind: 'lead',
+    linkId: 'deal_trentemoult',
+  },
+  {
+    id: 'tsk_4',
+    entity: 'msr',
+    label: 'Commander la courroie de pan pour la lyre POINTE-001',
+    detail: 'Ticket de maintenance ouvert, immobilisation en cours.',
+    due: addDays(NOW, 3),
+    done: false,
+    priority: 'normale',
+    owner: 'Malik Ferrand',
+    linkKind: null,
+    linkId: null,
+  },
+  {
+    id: 'tsk_5',
+    entity: 'owlaris',
+    label: 'Envoyer l’étude préliminaire Océania Pornic',
+    detail: 'Simulation EASE des 4 salles + terrasse, avec deux scénarios de budget.',
+    due: addDays(NOW, 3),
+    done: false,
+    priority: 'haute',
+    owner: 'Clara Nunes',
+    linkKind: 'lead',
+    linkId: 'deal_oceania',
+  },
+  {
+    id: 'tsk_6',
+    entity: 'msr',
+    label: 'Vérifier la dispo groupe électrogène pour le festival',
+    detail: 'Deux GE au parc, un déjà engagé sur la même période.',
+    due: addDays(NOW, 5),
+    done: false,
+    priority: 'haute',
+    owner: 'Inès Rocher',
+    linkKind: 'projet',
+    linkId: 'prj_festival_estuaire',
+  },
+  {
+    id: 'tsk_7',
+    entity: 'owlaris',
+    label: 'Préparer l’audition commission CCEG',
+    detail: 'Support de présentation + visite 3D de la salle polyvalente.',
+    due: addDays(NOW, 9),
+    done: false,
+    priority: 'normale',
+    owner: 'Clara Nunes',
+    linkKind: 'projet',
+    linkId: 'prj_cceg_polyvalente',
+  },
+  {
+    id: 'tsk_8',
+    entity: 'maree-sonore',
+    label: 'Repérage plan B pluie — Roche-Jagu',
+    detail: 'Confirmer l’implantation sous orangerie avec la wedding planner.',
+    due: addDays(NOW, 6),
+    done: true,
+    priority: 'normale',
+    owner: 'Tom Aubertin',
+    linkKind: 'projet',
+    linkId: 'prj_mariage_durand',
+  },
+];
+
+/* ------------------------------------------------------------ assemblage BDD */
+
+export function createSeedDatabase(): Database {
+  const docs = [...HERO_DOCS, ...historicalDocs()];
+
+  // Les paiements generes sont soldes : on aligne leur montant sur le total TTC.
+  for (const item of docs) {
+    if (item.status !== 'paye') continue;
+    const settled = item.payments.filter((payment) => payment.amount === 0);
+    if (!settled.length) continue;
+    const totals = docTotalsLite(item);
+    for (const payment of settled) payment.amount = totals;
+  }
+
+  const numbering = {} as Database['settings']['numbering'];
+  for (const company of COMPANIES) {
+    const last = (prefix: string) =>
+      docs
+        .filter((d) => d.number.startsWith(prefix))
+        .map((d) => Number(d.number.split('-').pop()))
+        .reduce((max, value) => (Number.isFinite(value) && value > max ? value : max), 0);
+    numbering[company.id] = {
+      devis: last(company.quotePrefix),
+      facture: last(company.invoicePrefix),
+      avoir: last(company.creditPrefix),
+    };
+  }
+
+  return {
+    version: 1,
+    companies: COMPANIES,
+    clients: CLIENTS,
+    deals: DEALS,
+    products: PRODUCTS,
+    packs: PACKS,
+    docs,
+    projects: PROJECTS,
+    staff: STAFF,
+    assignments: [
+      { id: 'asg_1', entity: 'msr', projectId: 'prj_festival_estuaire', staffId: 'stf_ines', start: addDays(NOW, 32), end: addDays(NOW, 39), role: 'Chef de parc' },
+      { id: 'asg_2', entity: 'maree-sonore', projectId: 'prj_festival_estuaire', staffId: 'stf_gael', start: addDays(NOW, 32), end: addDays(NOW, 39), role: 'Régie générale' },
+      { id: 'asg_3', entity: 'maree-sonore', projectId: 'prj_festival_estuaire', staffId: 'stf_sarah', start: addDays(NOW, 33), end: addDays(NOW, 38), role: 'Pupitreuse lumière' },
+      { id: 'asg_4', entity: 'maree-sonore', projectId: 'prj_festival_estuaire', staffId: 'stf_tom', start: addDays(NOW, 34), end: addDays(NOW, 38), role: 'Son façade' },
+      { id: 'asg_5', entity: 'msr', projectId: 'prj_festival_estuaire', staffId: 'stf_leo', start: addDays(NOW, 32), end: addDays(NOW, 39), role: 'Accroche-levage' },
+      { id: 'asg_6', entity: 'maree-sonore', projectId: 'prj_mariage_durand', staffId: 'stf_tom', start: addDays(NOW, 19), end: addDays(NOW, 20), role: 'Technicien référent' },
+      { id: 'asg_7', entity: 'owlaris', projectId: 'prj_concorde_salle2', staffId: 'stf_clara', start: addDays(NOW, -21), end: addDays(NOW, 26), role: 'Cheffe de projet' },
+      { id: 'asg_8', entity: 'owlaris', projectId: 'prj_concorde_salle2', staffId: 'stf_victor', start: addDays(NOW, -21), end: addDays(NOW, -5), role: 'Maquette 3D' },
+      { id: 'asg_9', entity: 'msr', projectId: 'prj_convention_verdance', staffId: 'stf_bastien', start: addDays(NOW, 60), end: addDays(NOW, 63), role: 'Livraison' },
+    ],
+    expenses: expensesSeed(),
+    tickets: TICKETS,
+    pages: PAGES,
+    scenes: SCENES,
+    tasks: TASKS,
+    categories: CATEGORIES,
+    settings: {
+      activeScope: 'groupe',
+      numbering,
+      vatRates: [0, 5.5, 10, 20],
+      fiscalYearStart: '01-01',
+      currency: 'EUR',
+      locale: 'fr-FR',
+      revenueTargets: { msr: 260000, 'maree-sonore': 175000, owlaris: 200000 },
+      operator: 'Gaël Lauwerier',
+      station: 'Bureau Nantes',
+    },
+  };
+}
+
+/** Total TTC simplifie, utilise uniquement pour solder les paiements du jeu de demonstration. */
+function docTotalsLite(item: BusinessDoc): number {
+  let net = 0;
+  for (const line of item.lines) {
+    const days = Math.max(1, line.days || 1);
+    const source = PRODUCTS.find((p) => p.id === line.productId) ?? null;
+    const billed = line.kind === 'location' && line.degressive ? degressiveCoefLite(source, days) : days;
+    const gross = line.qty * line.unitPrice * billed;
+    net += gross * (1 - (line.discountPct || 0) / 100);
+  }
+  net *= 1 - (item.globalDiscountPct || 0) / 100;
+  net += item.shipping || 0;
+  const rate = item.lines[0]?.vatRate ?? 20;
+  return Math.round(net * (1 + rate / 100) * 100) / 100;
+}
+
+function degressiveCoefLite(source: Product | null, days: number): number {
+  const steps = (source?.degressive?.length ? source.degressive : DEFAULT_DEGRESSIVE)
+    .slice()
+    .sort((a, b) => a.minDays - b.minDays);
+  let coef = days;
+  for (const step of steps) if (days >= step.minDays) coef = step.coef + (days - step.minDays) * 0.25;
+  return Math.min(coef, days);
+}
