@@ -389,6 +389,30 @@ function product(seed: ProductSeed): Product {
  * Studio — source unique — puis completees par les prestations et forfaits,
  * qui n'ont pas de representation 3D.
  */
+/**
+ * Unites facturees a la piece pour un seul poste : une dalle, un metre de
+ * comptoir, un metre carre de piste, une place assise. Le parc doit en
+ * detenir de quoi monter plusieurs chantiers, pas une seule unite — un mur
+ * LED de 8 x 4 m consomme a lui seul cent vingt-huit dalles.
+ */
+const UNITES_MULTIPLES: Record<string, number> = {
+  dalle: 24,
+  'm²': 16,
+  'mètre linéaire': 12,
+  'module de 1 m': 8,
+  'module de 1,2 m': 8,
+  place: 40,
+  'élément de 2 m': 8,
+  'panneau de 2 m': 8,
+  travée: 6,
+  case: 6,
+  praticable: 8,
+  'guirlande de 10 m': 6,
+  élément: 4,
+  poutre: 6,
+  barrière: 8,
+};
+
 const LIBRARY_PRODUCTS: Product[] = (() => {
   const seen = new Set<string>();
   const out: Product[] = [];
@@ -430,13 +454,18 @@ const LIBRARY_PRODUCTS: Product[] = (() => {
 function stockFor(source: (typeof OBJECT_LIBRARY)[number]['product']): number {
   if (!source) return 0;
   if (source.mode !== 'location') return source.mode === 'vente' ? 20 : 0;
-  if (source.cost <= 50) return 400;
-  if (source.cost <= 150) return 200;
-  if (source.cost <= 400) return 80;
-  if (source.cost <= 1200) return 24;
-  if (source.cost <= 5000) return 12;
-  if (source.cost <= 15000) return 4;
-  return 2;
+  const base =
+    source.cost <= 50 ? 400
+    : source.cost <= 150 ? 200
+    : source.cost <= 400 ? 80
+    : source.cost <= 1200 ? 24
+    : source.cost <= 5000 ? 16
+    : source.cost <= 15000 ? 8
+    : 4;
+  // Un tarif eleve traduit ici la valeur d'une seule piece, pas la rarete du
+  // lot : sans ce facteur, le parc affiche des disponibilites negatives des
+  // qu'un devis realiste demande un mur LED ou une piste de danse.
+  return base * (UNITES_MULTIPLES[source.unit] ?? 1);
 }
 
 /** Suivi unitaire : reserve au materiel de valeur, ou il a un sens. */
